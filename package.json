@@ -24,6 +24,7 @@
     "lint": "oxlint",
     "format": "oxfmt --write",
     "format:check": "oxfmt --check",
+    "demo": "vite --config vite.demo.config.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -50,6 +51,7 @@
     "tsdown": "^0.20.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "vite": "^7.3.1",
     "vitest": "^4.0.18"
   },
   "engines": {

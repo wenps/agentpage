@@ -1,26 +1,22 @@
 /**
  * Tool Registry — 工具注册表，负责工具的注册、查询和分发。
  *
- * 这是 Agent 工具系统的核心枢纽，采用 Registry 模式（注册表模式）：
+ * 实例化设计 — 每个 Agent 创建独立的 ToolRegistry，避免全局状态污染：
  *
- *   ┌──────────────┐     registerTool()     ┌───────────────────┐
- *   │  exec-tool   │ ────────────────────►  │                   │
- *   │  browser-tool│ ────────────────────►  │   Tool Registry   │
- *   │  file-tools  │ ────────────────────►  │   (Map 存储)       │
- *   │  web-search  │ ────────────────────►  │                   │
- *   │  web-fetch   │ ────────────────────►  │                   │
- *   └──────────────┘                        └─────────┬─────────┘
- *                                                     │
- *                               ┌─────────────────────┼──────────────────┐
- *                               │                     │                  │
- *                               ▼                     ▼                  ▼
- *                     getToolDefinitions()    dispatchToolCall()    helper 函数
- *                     (给 AI 看工具列表)      (按名字执行工具)    (参数读取辅助)
+ *   // Node 端
+ *   const registry = new ToolRegistry();
+ *   registerBuiltinTools(registry);      // 注册 exec, file, browser...
+ *   await executeAgentLoop({ registry, ... });
  *
- * 为什么用 Registry 模式？
- * - 解耦：agent-core 不需要知道具体有哪些工具，只通过注册表查询和调用
- * - 可扩展：新增工具只需创建文件 + 调用 registerTool()，不用改核心代码
- * - 统一接口：所有工具都遵循 ToolDefinition 接口，AI 和调度器都能统一处理
+ *   // Web 端
+ *   const registry = new ToolRegistry();
+ *   registerWebTools(registry);           // 注册 dom, navigate...
+ *   await executeAgentLoop({ registry, ... });
+ *
+ * 优点：
+ * - 多实例安全：Node Agent 和 Web Agent 可并行运行，工具列表互不干扰
+ * - 测试隔离：每个 test case 创建独立 registry，无需清理全局状态
+ * - 可组合：可按需注册不同工具子集
  */
 import { Type, type TObject } from "@sinclair/typebox";
 
@@ -54,58 +50,51 @@ export type ToolDefinition = {
 };
 
 /**
- * 工具存储 — 用 Map 以工具名为 key 存储所有已注册的工具。
- * 模块级变量，整个进程共享一份注册表。
- */
-const tools = new Map<string, ToolDefinition>();
-
-/**
- * 注册一个工具到注册表。
- * 调用方：src/agent/tools/index.ts 中的 registerBuiltinTools()
- */
-export function registerTool(tool: ToolDefinition): void {
-  tools.set(tool.name, tool);
-}
-
-/**
- * 获取所有已注册的工具定义列表。
- * 调用方：agent-core.ts — 将列表发送给 AI 模型，告知可用工具。
- */
-export function getToolDefinitions(): ToolDefinition[] {
-  return Array.from(tools.values());
-}
-
-/**
- * 根据工具名分发并执行工具调用。
+ * 工具注册表实例 — 管理一组工具的注册、查询和分发。
  *
- * 调用方：agent-core.ts 中循环处理 AI 返回的 tool_call 时调用。
- * - 找到工具 → 执行 execute() → 返回结果
- * - 找不到 → 返回错误信息（不会抛异常，让 AI 知道工具不存在）
- * - 执行出错 → 捕获异常，返回错误信息（不中断 Agent 循环）
+ * 每个 Agent 拥有独立的 ToolRegistry 实例，从而：
+ * - Node Agent 的 exec/file 工具不会泄漏到 Web Agent
+ * - Web Agent 的 dom/navigate 工具不会泄漏到 Node Agent
+ * - 测试中不同 case 互不影响
  */
-export async function dispatchToolCall(
-  name: string,
-  input: unknown,
-): Promise<ToolCallResult> {
-  const tool = tools.get(name);
-  if (!tool) {
-    // 工具不存在 — 返回错误让 AI 知道，而不是抛异常崩溃
-    return {
-      content: `Unknown tool: ${name}`,
-      details: { error: true, toolName: name },
-    };
+export class ToolRegistry {
+  private tools = new Map<string, ToolDefinition>();
+
+  /** 注册一个工具 */
+  register(tool: ToolDefinition): void {
+    this.tools.set(tool.name, tool);
   }
 
-  try {
-    const params = (input ?? {}) as Record<string, unknown>;
-    return await tool.execute(params);
-  } catch (err) {
-    // 工具执行异常 — 捕获后优雅返回，Agent 可以继续运行
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      content: `Tool "${name}" failed: ${message}`,
-      details: { error: true, toolName: name, message },
-    };
+  /** 获取所有已注册的工具定义列表（发给 AI，告知可用工具） */
+  getDefinitions(): ToolDefinition[] {
+    return Array.from(this.tools.values());
+  }
+
+  /**
+   * 根据工具名分发并执行工具调用。
+   * - 找到工具 → 执行 execute() → 返回结果
+   * - 找不到 → 返回错误信息（不抛异常，让 AI 知道工具不存在）
+   * - 执行出错 → 捕获异常，返回错误信息（不中断 Agent 循环）
+   */
+  async dispatch(name: string, input: unknown): Promise<ToolCallResult> {
+    const tool = this.tools.get(name);
+    if (!tool) {
+      return {
+        content: `Unknown tool: ${name}`,
+        details: { error: true, toolName: name },
+      };
+    }
+
+    try {
+      const params = (input ?? {}) as Record<string, unknown>;
+      return await tool.execute(params);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: `Tool "${name}" failed: ${message}`,
+        details: { error: true, toolName: name, message },
+      };
+    }
   }
 }
 

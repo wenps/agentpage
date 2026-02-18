@@ -8,24 +8,19 @@
  * 【后续可拓展】
  * - 添加自定义工具加载器（从插件目录动态加载）
  */
-import { registerTool } from "../../core/tool-registry.js";
+import { ToolRegistry } from "../../core/tool-registry.js";
 import { createExecTool } from "./exec-tool.js";
 import { createBrowserTool } from "./browser-tool.js";
 import { createWebFetchTool } from "./web-fetch-tool.js";
 import { createWebSearchTool } from "./web-search-tool.js";
 import { createFileReadTool, createFileWriteTool, createListDirTool } from "./file-tools.js";
 
-let registered = false;
-
-export function registerBuiltinTools(): void {
-  if (registered) return;
-  registered = true;
-
-  registerTool(createExecTool());       // Shell 命令执行
-  registerTool(createBrowserTool());    // 浏览器自动化（Playwright）
-  registerTool(createWebFetchTool());   // 网页内容抓取
-  registerTool(createWebSearchTool());  // 网页搜索
-  registerTool(createFileReadTool());   // 文件读取
-  registerTool(createFileWriteTool());  // 文件写入
-  registerTool(createListDirTool());    // 目录浏览
+export function registerBuiltinTools(registry: ToolRegistry): void {
+  registry.register(createExecTool());       // Shell 命令执行
+  registry.register(createBrowserTool());    // 浏览器自动化（Playwright）
+  registry.register(createWebFetchTool());   // 网页内容抓取
+  registry.register(createWebSearchTool());  // 网页搜索
+  registry.register(createFileReadTool());   // 文件读取
+  registry.register(createFileWriteTool());  // 文件写入
+  registry.register(createListDirTool());    // 目录浏览
 }

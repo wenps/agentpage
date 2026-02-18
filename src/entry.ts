@@ -15,7 +15,7 @@ const envFile = path.join(process.cwd(), ".env");
 if (existsSync(envFile)) config({ path: envFile });
 
 // 直接启动交互式聊天
-const { runInteractiveChat } = await import("./cli/interactive.js");
+const { runInteractiveChat } = await import("./node/cli/interactive.js");
 runInteractiveChat().catch((err: Error) => {
   console.error("Fatal:", err.message);
   process.exit(1);

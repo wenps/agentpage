@@ -18,8 +18,8 @@
  */
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
-import { BrowserController } from "../../browser/controller.js";
-import { loadConfig } from "../../config/config.js";
+import { BrowserController } from "../browser/controller.js";
+import { loadConfig } from "../config.js";
 
 /**
  * 获取已有的浏览器控制器实例，或根据配置创建一个新的。

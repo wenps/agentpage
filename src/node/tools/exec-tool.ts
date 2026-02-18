@@ -14,8 +14,8 @@
  */
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
-import { getShellConfig, sanitizeBinaryOutput } from "../../process/shell.js";
-import { runCommandWithTimeout, type SpawnResult } from "../../process/exec.js";
+import { getShellConfig, sanitizeBinaryOutput } from "../process/shell.js";
+import { runCommandWithTimeout, type SpawnResult } from "../process/exec.js";
 
 /** 输出最大字符数，超过则截断 */
 const MAX_OUTPUT_CHARS = 30_000;

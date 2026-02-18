@@ -1,95 +1,211 @@
 /**
- * AI client abstraction — supports Anthropic and OpenAI.
- * Pattern from OpenClaw's multi-provider support in src/agents/model-auth.ts
- */
-import type { AutoPilotConfig } from "../config/config.js";
-import type { ToolDefinition } from "./tool-registry.js";
-
-export type AIToolCall = {
-  id: string;
-  name: string;
-  input: unknown;
-};
-
-export type AIMessage = {
-  role: "user" | "assistant" | "tool" | "system";
-  content: string | Array<{ toolCallId: string; result: string }>;
-  toolCalls?: AIToolCall[];
-};
-
-export type AIChatResponse = {
-  text?: string;
-  toolCalls?: AIToolCall[];
-  usage?: { inputTokens: number; outputTokens: number };
-};
-
-export type AIClient = {
-  chat(params: {
-    systemPrompt: string;
-    messages: AIMessage[];
-    tools?: ToolDefinition[];
-  }): Promise<AIChatResponse>;
-};
-
-export type AIClientConfig = {
-  provider: string;
-  model: string;
-  config: AutoPilotConfig;
-};
-
-/**
- * AI 客户端工厂函数 —— 项目连接 AI 的入口。
- * 根据配置中的 provider 字段创建对应的 AI 客户端实例。
+ * AI Client — 基于 fetch 的跨平台 AI 客户端。
+ *
+ * 使用原生 fetch API，Node 22+ 和浏览器都能运行。
+ * 不依赖任何 SDK（@anthropic-ai/sdk、openai），零环境耦合。
  *
  * 支持三种 provider：
- * - "anthropic" → Anthropic Claude API
- * - "openai"    → OpenAI GPT API
- * - "copilot"   → GitHub Copilot（OpenAI 兼容，使用 GitHub Token 认证）
+ * - "openai"    → OpenAI API (https://api.openai.com/v1)
+ * - "copilot"   → GitHub Models API (https://models.inference.ai.azure.com)
+ * - "anthropic" → Anthropic API (https://api.anthropic.com)
+ *
+ * 复用关系：
+ *   core/ai-client.ts ←── node/index.ts（Node 端 Agent）
+ *                     ←── web/index.ts（浏览器端 WebAgent）
  */
-export function createAIClient(params: AIClientConfig): AIClient {
-  const { provider } = params;
+import type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "./types.js";
+import type { ToolDefinition } from "./tool-registry.js";
+
+// Re-export 类型，方便外部统一从 ai-client 导入
+export type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "./types.js";
+
+// ─── 配置 ───
+
+export type AIClientConfig = {
+  /** AI 提供商: "openai" | "copilot" | "anthropic" */
+  provider: string;
+  /** 模型名称, 如 "gpt-4o", "claude-sonnet-4-20250514" */
+  model: string;
+  /** API Key / Token */
+  apiKey: string;
+  /** 自定义 API 基础 URL（可选） */
+  baseURL?: string;
+};
+
+// ─── 各 Provider 的默认端点 ───
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- API 响应无固定类型
+async function jsonBody(res: Response): Promise<any> {
+  return res.json();
+}
+
+const PROVIDER_DEFAULTS: Record<string, { baseURL: string }> = {
+  openai: { baseURL: "https://api.openai.com/v1" },
+  copilot: { baseURL: "https://models.inference.ai.azure.com" },
+  anthropic: { baseURL: "https://api.anthropic.com" },
+};
+
+// ─── 工厂函数 ───
+
+/**
+ * 创建 AI 客户端（纯 fetch 实现，跨平台）。
+ *
+ * @param config - 包含 provider、model、apiKey 等配置
+ * @returns AIClient 实例，调用 chat() 即可与 AI 对话
+ */
+export function createAIClient(config: AIClientConfig): AIClient {
+  const { provider } = config;
 
   switch (provider) {
-    case "anthropic":
-      return createAnthropicClient(params);
     case "openai":
-      return createOpenAIClient(params);
     case "copilot":
-      return createCopilotClient(params);
+      return createOpenAICompatibleClient(config);
+    case "anthropic":
+      return createAnthropicClient(config);
     default:
-      throw new Error(`Unknown AI provider: ${provider}. Supported: anthropic, openai, copilot`);
+      throw new Error(
+        `Unknown AI provider: ${provider}. Supported: openai, copilot, anthropic`,
+      );
   }
 }
 
-// ─── Anthropic Client ───
+// ─── OpenAI 兼容客户端（OpenAI + GitHub Copilot） ───
 
 /**
- * 创建 Anthropic（Claude）客户端。
- * 1. 动态 import SDK，避免未安装时启动报错。
- * 2. 优先使用配置文件中的 apiKey，其次读取环境变量 ANTHROPIC_API_KEY。
- * 3. 将内部统一的 messages/tools 格式转换为 Anthropic API 所需的格式。
- * 4. 调用 client.messages.create() 发送请求，解析返回的文本和工具调用。
+ * OpenAI 兼容协议客户端。
+ * OpenAI 和 GitHub Copilot (Models API) 使用相同的请求/响应格式。
  */
-function createAnthropicClient(params: AIClientConfig): AIClient {
+function createOpenAICompatibleClient(config: AIClientConfig): AIClient {
+  const baseURL =
+    config.baseURL ?? PROVIDER_DEFAULTS[config.provider]?.baseURL ?? "";
+
   return {
-    async chat({ systemPrompt, messages, tools }) {
-      // 动态加载 Anthropic SDK
-      const Anthropic = (await import("@anthropic-ai/sdk")).default;
-      // 获取 API Key：配置文件优先，环境变量兜底
-      const apiKey = params.config.agent?.apiKey ?? process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
+    async chat({ systemPrompt, messages, tools }): Promise<AIChatResponse> {
+      // 转换工具定义为 OpenAI function calling 格式
+      const openaiTools = tools?.map((t) => ({
+        type: "function" as const,
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: JSON.parse(JSON.stringify(t.schema)), // 清理 TypeBox Symbol
+        },
+      }));
 
-      // 使用 API Key 实例化 Anthropic 客户端
-      const client = new Anthropic({ apiKey });
+      // 构建 OpenAI 格式消息数组
+      const openaiMessages: Record<string, unknown>[] = [
+        { role: "system", content: systemPrompt },
+      ];
 
-      // 将统一的 ToolDefinition 转换为 Anthropic 工具格式
+      for (const m of messages) {
+        if (m.role === "tool" && Array.isArray(m.content)) {
+          // 工具结果 → 每个结果单独一条 tool 消息
+          for (const tc of m.content) {
+            openaiMessages.push({
+              role: "tool",
+              content: tc.result,
+              tool_call_id: tc.toolCallId,
+            });
+          }
+        } else if (m.role === "assistant" && m.toolCalls?.length) {
+          // AI 回复含工具调用
+          openaiMessages.push({
+            role: "assistant",
+            content: typeof m.content === "string" ? m.content : null,
+            tool_calls: m.toolCalls.map((tc) => ({
+              id: tc.id,
+              type: "function",
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.input),
+              },
+            })),
+          });
+        } else {
+          openaiMessages.push({
+            role: m.role,
+            content:
+              typeof m.content === "string"
+                ? m.content
+                : JSON.stringify(m.content),
+          });
+        }
+      }
+
+      // 构建请求体
+      const body: Record<string, unknown> = {
+        model: config.model,
+        messages: openaiMessages,
+        temperature: 0.3,
+        max_tokens: 8192,
+      };
+
+      if (openaiTools && openaiTools.length > 0) {
+        body.tools = openaiTools;
+        body.tool_choice = "auto";
+      }
+
+      // 发送请求
+      const res = await fetch(`${baseURL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`AI API ${res.status}: ${errText.slice(0, 500)}`);
+      }
+
+      const data = await jsonBody(res);
+      const choice = data.choices?.[0];
+      if (!choice) throw new Error("AI 未返回有效响应");
+
+      const msg = choice.message;
+
+      // 解析工具调用
+      const toolCalls: AIToolCall[] | undefined = msg.tool_calls
+        ?.map((tc: any) => ({
+          id: tc.id,
+          name: tc.function.name,
+          input: JSON.parse(tc.function.arguments),
+        }));
+
+      return {
+        text: msg.content || undefined,
+        toolCalls: toolCalls?.length ? toolCalls : undefined,
+        usage: data.usage
+          ? {
+              inputTokens: data.usage.prompt_tokens ?? 0,
+              outputTokens: data.usage.completion_tokens ?? 0,
+            }
+          : undefined,
+      };
+    },
+  };
+}
+
+// ─── Anthropic 客户端 ───
+
+/**
+ * Anthropic Claude 客户端。
+ * 使用 Anthropic Messages API 格式（与 OpenAI 不同）。
+ */
+function createAnthropicClient(config: AIClientConfig): AIClient {
+  const baseURL = config.baseURL ?? PROVIDER_DEFAULTS.anthropic.baseURL;
+
+  return {
+    async chat({ systemPrompt, messages, tools }): Promise<AIChatResponse> {
+      // 转换工具定义
       const anthropicTools = tools?.map((t) => ({
         name: t.name,
         description: t.description,
-        input_schema: t.schema as Record<string, unknown>,
+        input_schema: JSON.parse(JSON.stringify(t.schema)),
       }));
 
-      // 将统一消息格式转换为 Anthropic 消息格式（tool_result / tool_use 等）
+      // 转换消息格式
       const anthropicMessages = messages
         .filter((m) => m.role !== "system")
         .map((m) => {
@@ -104,7 +220,7 @@ function createAnthropicClient(params: AIClientConfig): AIClient {
             };
           }
           if (m.role === "assistant" && m.toolCalls?.length) {
-            const content: Array<Record<string, unknown>> = [];
+            const content: Record<string, unknown>[] = [];
             if (m.content && typeof m.content === "string") {
               content.push({ type: "text", text: m.content });
             }
@@ -120,28 +236,51 @@ function createAnthropicClient(params: AIClientConfig): AIClient {
           }
           return {
             role: m.role as "user" | "assistant",
-            content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+            content:
+              typeof m.content === "string"
+                ? m.content
+                : JSON.stringify(m.content),
           };
         });
 
-      // 核心调用：向 Anthropic API 发送聊天请求
-      const response = await client.messages.create({
-        model: params.model,
-        max_tokens: params.model.includes("opus") ? 16384 : 8192,
+      // 构建请求体
+      const body: Record<string, unknown> = {
+        model: config.model,
+        max_tokens: config.model.includes("opus") ? 16384 : 8192,
         system: systemPrompt,
-        messages: anthropicMessages as any,
-        tools: anthropicTools as any,
+        messages: anthropicMessages,
+      };
+      if (anthropicTools && anthropicTools.length > 0) {
+        body.tools = anthropicTools;
+      }
+
+      // 发送请求
+      const res = await fetch(`${baseURL}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": config.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
       });
 
-      // 从响应中提取纯文本内容
-      const text = response.content
-        .filter((b: any) => b.type === "text")
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Anthropic API ${res.status}: ${errText.slice(0, 500)}`);
+      }
+
+      const data = await jsonBody(res);
+
+      // 提取文本
+      const text = data.content
+        ?.filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
         .join("");
 
-      // 从响应中提取工具调用（function calling）
-      const toolCalls = response.content
-        .filter((b: any) => b.type === "tool_use")
+      // 提取工具调用
+      const toolCalls: AIToolCall[] | undefined = data.content
+        ?.filter((b: any) => b.type === "tool_use")
         .map((b: any) => ({
           id: b.id,
           name: b.name,
@@ -150,149 +289,14 @@ function createAnthropicClient(params: AIClientConfig): AIClient {
 
       return {
         text: text || undefined,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        usage: response.usage
-          ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens }
-          : undefined,
-      };
-    },
-  };
-}
-
-// ─── OpenAI Client ───
-
-/**
- * 创建 OpenAI（GPT）客户端。
- * 1. 动态 import SDK，避免未安装时启动报错。
- * 2. 优先使用配置文件中的 apiKey，其次读取环境变量 OPENAI_API_KEY。
- * 3. 将内部统一的 messages/tools 格式转换为 OpenAI API 所需的格式。
- * 4. 调用 client.chat.completions.create() 发送请求，解析返回的文本和工具调用。
- */
-function createOpenAIClient(params: AIClientConfig): AIClient {
-  return {
-    async chat({ systemPrompt, messages, tools }) {
-      // 动态加载 OpenAI SDK
-      const OpenAI = (await import("openai")).default;
-      // 获取 API Key：配置文件优先，环境变量兜底
-      const apiKey = params.config.agent?.apiKey ?? process.env.OPENAI_API_KEY;
-      if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
-
-      // 使用 API Key 实例化 OpenAI 客户端（支持自定义 baseURL）
-      const client = new OpenAI({
-        apiKey,
-        ...(params.config.agent?.baseURL ? { baseURL: params.config.agent.baseURL } : {}),
-      });
-
-      // 将统一的 ToolDefinition 转换为 OpenAI function calling 格式
-      const openaiTools = tools?.map((t) => ({
-        type: "function" as const,
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.schema as Record<string, unknown>,
-        },
-      }));
-
-      // 构建 OpenAI 消息数组，system prompt 作为第一条 system 消息
-      const openaiMessages: Array<Record<string, unknown>> = [
-        { role: "system", content: systemPrompt },
-      ];
-
-      // 将统一消息格式转换为 OpenAI 消息格式（tool / tool_calls 等）
-      for (const m of messages) {
-        if (m.role === "tool" && Array.isArray(m.content)) {
-          for (const tc of m.content) {
-            openaiMessages.push({
-              role: "tool",
-              tool_call_id: tc.toolCallId,
-              content: tc.result,
-            });
-          }
-        } else if (m.role === "assistant" && m.toolCalls?.length) {
-          openaiMessages.push({
-            role: "assistant",
-            content: typeof m.content === "string" ? m.content : null,
-            tool_calls: m.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: "function",
-              function: { name: tc.name, arguments: JSON.stringify(tc.input) },
-            })),
-          });
-        } else {
-          openaiMessages.push({
-            role: m.role,
-            content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-          });
-        }
-      }
-
-      // 核心调用：向 OpenAI API 发送聊天补全请求
-      const response = await client.chat.completions.create({
-        model: params.model,
-        messages: openaiMessages as any,
-        tools: openaiTools,
-      });
-
-      // 解析响应：提取第一个 choice 中的文本和工具调用
-      const choice = response.choices[0];
-      const toolCalls = choice?.message?.tool_calls?.map((tc: any) => ({
-        id: tc.id,
-        name: tc.function.name,
-        input: JSON.parse(tc.function.arguments),
-      }));
-
-      return {
-        text: choice?.message?.content ?? undefined,
         toolCalls: toolCalls?.length ? toolCalls : undefined,
-        usage: response.usage
+        usage: data.usage
           ? {
-              inputTokens: response.usage.prompt_tokens ?? 0,
-              outputTokens: response.usage.completion_tokens ?? 0,
+              inputTokens: data.usage.input_tokens,
+              outputTokens: data.usage.output_tokens,
             }
           : undefined,
       };
     },
   };
-}
-
-// ─── GitHub Copilot Client ───
-
-/**
- * 创建 GitHub Copilot 客户端。
- *
- * 使用 GitHub Models API（OpenAI 兼容端点），支持 Personal Access Token 认证。
- * - API 端点：https://models.inference.ai.azure.com
- * - 认证方式：使用 GitHub Personal Access Token
- * - 可用模型：gpt-4o、gpt-4o-mini、o3-mini、claude-sonnet-4-20250514 等
- *
- * 使用方法：
- *   export GITHUB_TOKEN="github_pat_xxxx..."
- */
-function createCopilotClient(params: AIClientConfig): AIClient {
-  // GitHub Models API 端点（支持 PAT 认证）
-  const copilotBaseURL = params.config.agent?.baseURL ?? "https://models.inference.ai.azure.com";
-  const copilotApiKey = params.config.agent?.apiKey ?? process.env.GITHUB_TOKEN;
-
-  if (!copilotApiKey) {
-    throw new Error(
-      "Missing GITHUB_TOKEN for Copilot provider.\n" +
-      "Set it via: export GITHUB_TOKEN=\"ghp_xxxx...\"\n" +
-      "Or run: gh auth token"
-    );
-  }
-
-  // 构造一个伪造的 config，让 OpenAI client 使用 Copilot 的 endpoint 和 token
-  const copilotConfig: AIClientConfig = {
-    ...params,
-    config: {
-      ...params.config,
-      agent: {
-        ...params.config.agent,
-        apiKey: copilotApiKey,
-        baseURL: copilotBaseURL,
-      },
-    },
-  };
-
-  return createOpenAIClient(copilotConfig);
 }
