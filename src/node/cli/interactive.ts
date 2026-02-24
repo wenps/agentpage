@@ -13,6 +13,7 @@
  */
 import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import type { AIMessage } from "../../core/types.js";
 import { runAgent } from "../index.js";
 import { loadConfig } from "../config.js";
 
@@ -21,10 +22,14 @@ export async function runInteractiveChat(): Promise<void> {
 
   // dry-run 开关：输入 /dry 切换
   let dryRun = false;
+  // 多轮记忆开关：输入 /memory 切换
+  let memory = false;
+  // 对话历史（memory 开启时累积）
+  let history: AIMessage[] = [];
 
   console.log("\n\ud83e\udd16 AutoPilot Interactive Mode");
   console.log("Type a message to chat. Type 'exit' or Ctrl+C to quit.");
-  console.log("Commands: /dry (toggle dry-run mode)\n");
+  console.log("Commands: /dry (toggle dry-run) | /memory (toggle memory) | /clear (clear history)\n");
 
   const rl = readline.createInterface({ input: stdin, output: stdout });
 
@@ -42,6 +47,21 @@ export async function runInteractiveChat(): Promise<void> {
         continue;
       }
 
+      // 内置命令：切换多轮记忆
+      if (message === "/memory") {
+        memory = !memory;
+        if (!memory) history = [];
+        console.log(`\n\ud83e\udde0 Memory: ${memory ? "ON\uff08\u5df2\u5f00\u542f\u591a\u8f6e\u8bb0\u5fc6\uff09" : "OFF\uff08\u5df2\u5173\u95ed\uff0c\u5386\u53f2\u5df2\u6e05\u7a7a\uff09"}\n`);
+        continue;
+      }
+
+      // 内置命令：清空对话历史
+      if (message === "/clear") {
+        history = [];
+        console.log("\n\ud83d\uddd1\ufe0f  \u5bf9\u8bdd\u5386\u53f2\u5df2\u6e05\u7a7a\n");
+        continue;
+      }
+
       try {
         const result = await runAgent({
           message,
@@ -49,7 +69,13 @@ export async function runInteractiveChat(): Promise<void> {
           model: config.agent?.model,
           config,
           dryRun,
+          history: memory ? history : undefined,
         });
+
+        // 记忆模式：累积对话历史
+        if (memory) {
+          history = result.messages;
+        }
 
         console.log(`\nautopilot > ${result.reply}\n`);
         if (result.toolCalls.length > 0) {

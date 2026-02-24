@@ -193,6 +193,8 @@
     </select>
     <label>Dry-run:</label>
     <input type="checkbox" id="dryrun" />
+    <label>记忆:</label>
+    <input type="checkbox" id="memory" />
   </div>
 
   <div id="chat"></div>
@@ -204,8 +206,8 @@
     <button onclick="sendQuick('点击页面上的第一个按钮')">👆 点击按钮</button>
     <button onclick="sendQuick('获取页面上所有链接的文本')">🔗 所有链接</button>
     <button onclick="sendQuick('把页面滚动到底部')">⬇️ 滚动底部</button>
-    <button onclick="sendQuick('执行 document.querySelectorAll(\"*\").length 看看有多少DOM节点')">📊 DOM计数</button>
-  </div>
+    <button onclick="sendQuick(`执行 document.querySelectorAll(\"*\").length 看看有多少DOM节点`)">📊 DOM计数</button>    
+    <button onclick="clearHistory()">🗑️ 清空记忆</button>  </div>
 
   <div class="input-area">
     <input type="text" id="input" placeholder="输入指令，让 AI 操作当前页面..." />

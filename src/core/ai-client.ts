@@ -13,8 +13,7 @@
  *   core/ai-client.ts ←── node/index.ts（Node 端 Agent）
  *                     ←── web/index.ts（浏览器端 WebAgent）
  */
-import type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "./types.js";
-import type { ToolDefinition } from "./tool-registry.js";
+import type { AIClient, AIChatResponse, AIToolCall } from "./types.js";
 
 // Re-export 类型，方便外部统一从 ai-client 导入
 export type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "./types.js";

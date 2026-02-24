@@ -32,6 +32,7 @@ import {
   type AgentLoopCallbacks,
   type AgentLoopResult,
 } from "../core/agent-loop.js";
+import type { AIMessage } from "../core/types.js";
 import { createAIClient, type AIClientConfig } from "../core/ai-client.js";
 import { ToolRegistry, type ToolDefinition } from "../core/tool-registry.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
@@ -54,6 +55,8 @@ export type WebAgentOptions = {
   systemPrompt?: string;
   /** 最大工具调用轮次（默认 10） */
   maxRounds?: number;
+  /** 是否启用多轮对话记忆（默认 false） */
+  memory?: boolean;
 };
 
 // ─── WebAgent 类 ───
@@ -66,6 +69,11 @@ export class WebAgent {
   private dryRun: boolean;
   private maxRounds: number;
   private customSystemPrompt?: string;
+
+  /** 多轮对话记忆开关 */
+  private memory: boolean;
+  /** 对话历史（memory 开启时自动累积） */
+  private history: AIMessage[] = [];
 
   /** 工具注册表实例 — 每个 WebAgent 拥有独立的工具集 */
   private registry = new ToolRegistry();
@@ -81,6 +89,7 @@ export class WebAgent {
     this.dryRun = options.dryRun ?? false;
     this.maxRounds = options.maxRounds ?? 10;
     this.customSystemPrompt = options.systemPrompt;
+    this.memory = options.memory ?? false;
   }
 
   // ─── 工具管理 ───
@@ -127,6 +136,22 @@ export class WebAgent {
     this.customSystemPrompt = prompt;
   }
 
+  /** 开启或关闭多轮对话记忆 */
+  setMemory(enabled: boolean): void {
+    this.memory = enabled;
+    if (!enabled) this.history = [];
+  }
+
+  /** 获取当前记忆开关状态 */
+  getMemory(): boolean {
+    return this.memory;
+  }
+
+  /** 清空对话历史（不影响记忆开关） */
+  clearHistory(): void {
+    this.history = [];
+  }
+
   // ─── 核心能力 ───
 
   /**
@@ -157,14 +182,22 @@ export class WebAgent {
       buildSystemPrompt({ tools: this.registry.getDefinitions() });
 
     // 复用 core/agent-loop — 同一份决策循环
-    return executeAgentLoop({
+    const result = await executeAgentLoop({
       client,
       registry: this.registry,
       systemPrompt,
       message,
+      history: this.memory ? this.history : undefined,
       dryRun: this.dryRun,
       maxRounds: this.maxRounds,
       callbacks: this.callbacks,
     });
+
+    // 记忆模式：累积对话历史供下次 chat() 使用
+    if (this.memory) {
+      this.history = result.messages;
+    }
+
+    return result;
   }
 }

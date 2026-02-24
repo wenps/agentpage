@@ -45,6 +45,8 @@ export type AgentLoopParams = {
   systemPrompt: string;
   /** 用户消息 */
   message: string;
+  /** 历史对话消息（用于多轮记忆，按时间顺序排列） */
+  history?: AIMessage[];
   /** 干运行模式：打印工具调用但不执行 */
   dryRun?: boolean;
   /** 最大工具调用轮次（默认 10） */
@@ -58,6 +60,8 @@ export type AgentLoopResult = {
   reply: string;
   /** 所有工具调用记录 */
   toolCalls: Array<{ name: string; input: unknown; result: ToolCallResult }>;
+  /** 本轮完整对话消息（含历史 + 本轮，用于多轮记忆累积） */
+  messages: AIMessage[];
 };
 
 const DEFAULT_MAX_ROUNDS = 10;
@@ -78,13 +82,18 @@ export async function executeAgentLoop(
     registry,
     systemPrompt,
     message,
+    history,
     dryRun = false,
     maxRounds = DEFAULT_MAX_ROUNDS,
     callbacks,
   } = params;
 
   const tools = registry.getDefinitions();
-  const messages: AIMessage[] = [{ role: "user", content: message }];
+  // 将历史消息（如有）放在当前用户消息之前，实现多轮记忆
+  const messages: AIMessage[] = [
+    ...(history ?? []),
+    { role: "user", content: message },
+  ];
   const allToolCalls: AgentLoopResult["toolCalls"] = [];
   let finalReply = "";
 
@@ -155,5 +164,10 @@ export async function executeAgentLoop(
     // → 回到循环顶部，AI 根据工具结果继续思考
   }
 
-  return { reply: finalReply, toolCalls: allToolCalls };
+  // 如果有最终回复但尚未作为 assistant 消息加入历史，补充进去
+  if (finalReply) {
+    messages.push({ role: "assistant", content: finalReply });
+  }
+
+  return { reply: finalReply, toolCalls: allToolCalls, messages };
 }

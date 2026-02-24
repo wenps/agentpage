@@ -42,6 +42,8 @@ export type AgentRunParams = {
   config: AutoPilotConfig;
   /** 干运行模式：AI 请求调用工具时只打印配置，不实际执行 */
   dryRun?: boolean;
+  /** 历史对话消息（用于多轮记忆） */
+  history?: import("../core/types.js").AIMessage[];
 };
 
 /**
@@ -52,6 +54,8 @@ export type AgentRunResult = {
   reply: string;
   /** 所有工具调用记录（名称、输入参数、执行结果） */
   toolCalls: Array<{ name: string; input: unknown; result: import("../core/tool-registry.js").ToolCallResult }>;
+  /** 本轮完整对话消息（含历史 + 本轮，用于多轮记忆累积） */
+  messages: import("../core/types.js").AIMessage[];
   /** 实际使用的模型 ID */
   model: string;
   /** 总消耗 token 数（如可获取） */
@@ -99,12 +103,14 @@ export async function runAgent(params: AgentRunParams): Promise<AgentRunResult> 
     registry,
     systemPrompt,
     message,
+    history: params.history,
     dryRun,
   });
 
   return {
     reply: result.reply,
     toolCalls: result.toolCalls,
+    messages: result.messages,
     model: resolvedModel,
   };
 }

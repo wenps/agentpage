@@ -19,6 +19,7 @@ const sendBtn = document.getElementById("send") as HTMLButtonElement;
 const tokenEl = document.getElementById("token") as HTMLInputElement;
 const modelEl = document.getElementById("model") as HTMLSelectElement;
 const dryrunEl = document.getElementById("dryrun") as HTMLInputElement;
+const memoryEl = document.getElementById("memory") as HTMLInputElement;
 const statusEl = document.getElementById("status")!;
 
 // ─── 创建 Agent 实例 ───
@@ -79,9 +80,20 @@ tokenEl.addEventListener("change", () => {
   }
 });
 
+// 记忆开关：UI checkbox 变化时同步到 Agent
+memoryEl.addEventListener("change", () => {
+  agent.setMemory(memoryEl.checked);
+  if (memoryEl.checked) {
+    appendMsg("system", "🧠 已开启多轮记忆，AI 会记住之前的对话");
+  } else {
+    appendMsg("system", "🧠 已关闭多轮记忆，对话历史已清空");
+  }
+});
+
 // 暴露给 HTML 按钮的全局函数
 (window as any).sendQuick = sendQuick;
 (window as any).handleSend = handleSend;
+(window as any).clearHistory = clearHistory;
 
 // ─── Chat UI 函数 ───
 
@@ -108,6 +120,11 @@ function appendMsg(type: string, text: string): HTMLElement {
 function sendQuick(text: string) {
   inputEl.value = text;
   handleSend();
+}
+
+function clearHistory() {
+  agent.clearHistory();
+  appendMsg("system", "🗑️ 对话历史已清空");
 }
 
 let running = false;
