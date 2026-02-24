@@ -1,7 +1,7 @@
 /**
- * AI Client — 基于 fetch 的跨平台 AI 客户端。
+ * AI Client — 基于 fetch 的 AI 客户端。
  *
- * 使用原生 fetch API，Node 22+ 和浏览器都能运行。
+ * 使用原生 fetch API，浏览器天然支持。
  * 不依赖任何 SDK（@anthropic-ai/sdk、openai），零环境耦合。
  *
  * 支持三种 provider：
@@ -9,9 +9,8 @@
  * - "copilot"   → GitHub Models API (https://models.inference.ai.azure.com)
  * - "anthropic" → Anthropic API (https://api.anthropic.com)
  *
- * 复用关系：
- *   core/ai-client.ts ←── node/index.ts（Node 端 Agent）
- *                     ←── web/index.ts（浏览器端 WebAgent）
+ * 使用方：
+ *   core/ai-client.ts ←── web/index.ts（WebAgent）
  */
 import type { AIClient, AIChatResponse, AIToolCall } from "./types.js";
 

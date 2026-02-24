@@ -2,10 +2,9 @@
  * 共享类型定义 — AI 客户端接口 & 消息格式。
  *
  * 这些类型被多个模块共享，独立为文件避免循环依赖和环境耦合：
- * - src/core/agent-loop.ts（环境无关的决策循环）
+ * - src/core/agent-loop.ts（决策循环）
  * - src/core/ai-client.ts（基于 fetch 的跨平台客户端）
  * - src/web/index.ts（浏览器端 WebAgent）
- * - src/node/index.ts（Node 端 runAgent）
  *
  * 本文件零运行时依赖，仅包含 TypeScript 类型定义。
  */
@@ -51,9 +50,7 @@ export type AIChatResponse = {
 /**
  * AI 客户端抽象接口。
  *
- * 不同环境提供不同实现：
- * - Node 端：通过 SDK（Anthropic / OpenAI）连接
- * - 浏览器端：通过 fetch 直接调用 API
+ * 通过 createAIClient() 工厂函数创建，基于原生 fetch 实现。
  */
 export type AIClient = {
   chat(params: {

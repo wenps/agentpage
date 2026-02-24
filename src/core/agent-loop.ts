@@ -1,7 +1,7 @@
 /**
  * Agent Loop — 环境无关的 AI 决策循环。
  *
- * 从 agent-core.ts 中提取的核心 Tool-Use Loop，不依赖 Node.js 或浏览器 API：
+ * 核心 Tool-Use Loop，纯 TypeScript 实现：
  *
  *   消息 → AI 思考 → 需要工具？──是──→ 执行工具 → 反馈结果 → 继续思考
  *                       │
@@ -9,9 +9,7 @@
  *                       ↓
  *                    返回最终回复
  *
- * 使用方：
- * - Node 端：agent-core.ts 的 runAgent() 调用
- * - 浏览器端：web-agent.ts 的 WebAgent.chat() 调用
+ * 使用方：WebAgent.chat() 调用
  *
  * 依赖关系（全部环境无关）：
  * - types.ts       → 类型定义（import type，零运行时）
@@ -37,7 +35,7 @@ export type AgentLoopCallbacks = {
 // ─── 参数与结果 ───
 
 export type AgentLoopParams = {
-  /** AI 客户端实例（Node: SDK 客户端 / Browser: fetch 客户端） */
+  /** AI 客户端实例（基于 fetch 的客户端） */
   client: AIClient;
   /** 工具注册表实例（由调用方创建并注册好工具） */
   registry: ToolRegistry;
