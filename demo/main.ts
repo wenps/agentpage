@@ -53,6 +53,11 @@ agent.callbacks = {
         : JSON.stringify(result.content, null, 2);
     appendMsg("tool-result", str);
   },
+  onSnapshot: (snapshot) => {
+    const lines = snapshot.split("\n").length;
+    appendMsg("tool-result", `📸 页面快照已生成（${lines} 行 / ${snapshot.length} 字符）`);
+    statusEl.textContent = "分析页面快照...";
+  },
 };
 
 // ─── 从 localStorage 恢复 Token ───
@@ -64,6 +69,8 @@ if (savedToken) {
 }
 
 // ─── 事件绑定 ───
+
+sendBtn.addEventListener("click", () => handleSend());
 
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -127,20 +134,17 @@ function clearHistory() {
   appendMsg("system", "🗑️ 对话历史已清空");
 }
 
-let running = false;
-
 async function handleSend() {
   const text = inputEl.value.trim();
-  if (!text || running) return;
+  console.log(text);
+  
+  if (!text) return;
 
   const token = tokenEl.value.trim();
   if (!token) {
     appendMsg("error", "❌ 请先填写 GitHub Token");
     return;
   }
-
-  running = true;
-  sendBtn.disabled = true;
   inputEl.value = "";
 
   appendMsg("user", text);
@@ -155,8 +159,6 @@ async function handleSend() {
   } catch (err: any) {
     appendMsg("error", `❌ ${err.message || err}`);
   } finally {
-    running = false;
-    sendBtn.disabled = false;
     statusEl.textContent = "已连接";
     statusEl.classList.add("connected");
     inputEl.focus();

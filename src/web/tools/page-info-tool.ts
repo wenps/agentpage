@@ -21,24 +21,59 @@ import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js
  * 类似 Playwright 的 ariaSnapshot()，但基于 Web API 实现。
  * 只遍历可见元素，跳过 script/style/svg 等无意义节点。
  *
+ * 每个元素自动生成基于层级位置的 XPath 引用（ref），
+ * AI 可以通过 ref 精确定位元素，无需猜测 CSS 选择器。
+ *
  * 输出格式示例：
- *   [header]
- *     [nav]
- *       [a] "首页" href="/"
- *       [a] "关于" href="/about"
- *   [main]
- *     [h1] "欢迎来到示例网站"
- *     [input] type="text" placeholder="搜索..."
- *     [button] "搜索"
+ *   [header] ref="/body/header"
+ *     [nav] ref="/body/header/nav"
+ *       [a] "首页" href="/" ref="/body/header/nav/a[1]"
+ *       [a] "关于" href="/about" ref="/body/header/nav/a[2]"
+ *   [main] ref="/body/main"
+ *     [h1] "欢迎来到示例网站" ref="/body/main/h1"
+ *     [input] type="text" placeholder="搜索..." ref="/body/main/input"
+ *     [button] "搜索" id="search-btn" onclick ref="/body/main/button"
+ *
+ * 增强信息：
+ * - id：元素的 id 属性
+ * - placeholder：输入框的占位文本
+ * - 事件绑定：onclick/onchange 等内联事件处理器
+ * - 状态属性：disabled/checked/readonly/required 等
  */
-function generateSnapshot(root: Element = document.body, maxDepth = 6): string {
+export function generateSnapshot(root: Element = document.body, maxDepth = 6): string {
   const SKIP_TAGS = new Set([
     "SCRIPT", "STYLE", "SVG", "NOSCRIPT", "LINK", "META", "BR", "HR",
   ]);
 
-  const INTERACTIVE_ATTRS = ["href", "type", "placeholder", "value", "name", "role", "aria-label"];
+  const INTERACTIVE_ATTRS = [
+    "href", "type", "placeholder", "value", "name", "role", "aria-label",
+    "src", "alt", "title", "for", "action", "method", "target", "min", "max",
+    "pattern", "maxlength", "tabindex",
+  ];
 
-  function walk(el: Element, depth: number): string {
+  /** 布尔状态属性 — 只在存在时输出（无值），如 disabled、checked */
+  const BOOLEAN_ATTRS = [
+    "disabled", "checked", "readonly", "required", "selected",
+    "hidden", "multiple", "autofocus", "open",
+  ];
+
+  /** 内联事件属性前缀 */
+  const EVENT_PREFIX = "on";
+
+  /**
+   * 计算元素在父节点中同标签兄弟里的序号（1-based，XPath 规范）。
+   * 如果同标签兄弟只有一个，返回空字符串（无需索引消歧）。
+   */
+  function getSiblingIndex(el: Element): string {
+    const parent = el.parentElement;
+    if (!parent) return "";
+    const tag = el.tagName;
+    const siblings = Array.from(parent.children).filter((c) => c.tagName === tag);
+    if (siblings.length <= 1) return "";
+    return `[${siblings.indexOf(el) + 1}]`;
+  }
+
+  function walk(el: Element, depth: number, parentPath: string): string {
     if (depth > maxDepth) return "";
     if (SKIP_TAGS.has(el.tagName)) return "";
 
@@ -49,11 +84,61 @@ function generateSnapshot(root: Element = document.body, maxDepth = 6): string {
     const indent = "  ".repeat(depth);
     const tag = el.tagName.toLowerCase();
 
+    // 构建当前元素的 XPath
+    const index = getSiblingIndex(el);
+    const currentPath = `${parentPath}/${tag}${index}`;
+
     // 收集有意义的属性
     const attrs: string[] = [];
+
+    // 1. id — 最重要的标识信息，优先展示
+    const elId = el.getAttribute("id");
+    if (elId) attrs.push(`id="${elId}"`);
+
+    // 2. class — 关键 CSS 类名（最多 3 个）
+    const className = el.getAttribute("class")?.trim();
+    if (className) {
+      const classes = className.split(/\s+/).filter(Boolean).slice(0, 3).join(" ");
+      if (classes) attrs.push(`class="${classes}"`);
+    }
+
+    // 3. 交互属性（href, type, placeholder 等）
     for (const attr of INTERACTIVE_ATTRS) {
       const val = el.getAttribute(attr);
       if (val) attrs.push(`${attr}="${val}"`);
+    }
+
+    // 4. 布尔状态属性（disabled, checked 等）
+    for (const attr of BOOLEAN_ATTRS) {
+      if (el.hasAttribute(attr)) attrs.push(attr);
+    }
+
+    // 5. 事件绑定 — 检测内联事件处理器（onclick, onchange 等）
+    const events: string[] = [];
+    for (const attrObj of Array.from(el.attributes)) {
+      if (attrObj.name.startsWith(EVENT_PREFIX)) {
+        events.push(attrObj.name);
+      }
+    }
+    if (events.length > 0) attrs.push(`events=[${events.join(",")}]`);
+
+    // 6. data-* 属性（常用于框架绑定，最多 3 个）
+    const dataAttrs: string[] = [];
+    for (const attrObj of Array.from(el.attributes)) {
+      if (attrObj.name.startsWith("data-") && dataAttrs.length < 3) {
+        dataAttrs.push(`${attrObj.name}="${attrObj.value.slice(0, 30)}"`);
+      }
+    }
+    if (dataAttrs.length > 0) attrs.push(...dataAttrs);
+
+    // 7. 对于 input/textarea，补充当前实际 value（与 attribute 值可能不同）
+    if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.value) {
+      const currentVal = el.value.slice(0, 60);
+      // 只在 attribute 中没有 value 或 value 不同时补充
+      const attrVal = el.getAttribute("value");
+      if (attrVal !== currentVal) {
+        attrs.push(`current-value="${currentVal}"`);
+      }
     }
 
     // 获取直接文本（不含子元素文本）
@@ -67,23 +152,26 @@ function generateSnapshot(root: Element = document.body, maxDepth = 6): string {
     }
     directText = directText.trim();
 
-    // 构建当前元素描述
+    // 构建当前元素描述：[标签] "文本" 属性 ref="XPath"
     let line = `${indent}[${tag}]`;
     if (directText) line += ` "${directText.slice(0, 80)}"`;
     if (attrs.length) line += ` ${attrs.join(" ")}`;
+    line += ` ref="${currentPath}"`;
 
     const lines: string[] = [line];
 
     // 递归子元素
     for (let i = 0; i < el.children.length; i++) {
-      const childResult = walk(el.children[i], depth + 1);
+      const childResult = walk(el.children[i], depth + 1, currentPath);
       if (childResult) lines.push(childResult);
     }
 
     return lines.join("\n");
   }
 
-  return walk(root, 0) || "(空页面)";
+  // 根元素自身的标签作为路径起点，walk 内部不再重复追加
+  // 例如 root=body 时，parentPath=""，walk 中 currentPath="/body"
+  return walk(root, 0, "") || "(空页面)";
 }
 
 /**

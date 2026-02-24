@@ -37,6 +37,15 @@ import { createAIClient, type AIClientConfig } from "../core/ai-client.js";
 import { ToolRegistry, type ToolDefinition } from "../core/tool-registry.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { registerWebTools } from "./tools/register.js";
+import { generateSnapshot } from "./tools/page-info-tool.js";
+
+// ─── 回调类型 ───
+
+/** WebAgent 事件回调（扩展 AgentLoopCallbacks，增加快照事件） */
+export type WebAgentCallbacks = AgentLoopCallbacks & {
+  /** 自动快照生成完成时触发 */
+  onSnapshot?: (snapshot: string) => void;
+};
 
 // ─── 配置 ───
 
@@ -57,6 +66,8 @@ export type WebAgentOptions = {
   maxRounds?: number;
   /** 是否启用多轮对话记忆（默认 false） */
   memory?: boolean;
+  /** 是否在每次对话前自动生成页面快照（默认 true） */
+  autoSnapshot?: boolean;
 };
 
 // ─── WebAgent 类 ───
@@ -74,12 +85,14 @@ export class WebAgent {
   private memory: boolean;
   /** 对话历史（memory 开启时自动累积） */
   private history: AIMessage[] = [];
+  /** 自动快照开关 */
+  private autoSnapshot: boolean;
 
   /** 工具注册表实例 — 每个 WebAgent 拥有独立的工具集 */
   private registry = new ToolRegistry();
 
   /** 事件回调 — 绑定后可实时获取 Agent 进度，用于 UI 展示 */
-  callbacks: AgentLoopCallbacks = {};
+  callbacks: WebAgentCallbacks = {};
 
   constructor(options: WebAgentOptions) {
     this.token = options.token;
@@ -90,6 +103,7 @@ export class WebAgent {
     this.maxRounds = options.maxRounds ?? 10;
     this.customSystemPrompt = options.systemPrompt;
     this.memory = options.memory ?? false;
+    this.autoSnapshot = options.autoSnapshot ?? true;
   }
 
   // ─── 工具管理 ───
@@ -147,6 +161,16 @@ export class WebAgent {
     return this.memory;
   }
 
+  /** 开启或关闭自动快照 */
+  setAutoSnapshot(enabled: boolean): void {
+    this.autoSnapshot = enabled;
+  }
+
+  /** 获取当前自动快照开关状态 */
+  getAutoSnapshot(): boolean {
+    return this.autoSnapshot;
+  }
+
   /** 清空对话历史（不影响记忆开关） */
   clearHistory(): void {
     this.history = [];
@@ -177,9 +201,34 @@ export class WebAgent {
     });
 
     // 复用 core/system-prompt 或使用自定义
-    const systemPrompt =
+    let systemPrompt =
       this.customSystemPrompt ??
       buildSystemPrompt({ tools: this.registry.getDefinitions() });
+
+    // ─── 自动快照：注入 system prompt，不污染对话历史 ───
+    if (this.autoSnapshot) {
+      try {
+        const snapshot = generateSnapshot(document.body, 8);
+        this.callbacks.onSnapshot?.(snapshot);
+
+        systemPrompt += [
+          "\n\n## 当前页面 DOM 快照（实时生成）\n",
+          "每个元素末尾的 ref=\"...\" 是基于层级位置生成的唯一路径。",
+          "操作元素时，必须使用 ref 路径作为 selector 参数（如 /body/main/form/input）。\n",
+          "```",
+          snapshot,
+          "```\n",
+          "## 操作规则\n",
+          "1. 从快照中找到目标元素，复制其 ref 路径。",
+          "2. 将 ref 路径作为 dom 工具的 selector 参数传入。",
+          "3. 禁止猜测 CSS 选择器（如 \"button\"、\"#send\"），必须使用快照中的 ref。",
+          "4. 如果快照中看不到目标元素，先滚动页面或调整 maxDepth 获取更深的快照。",
+          "5. 先规划操作步骤，再按顺序逐步执行。",
+        ].join("\n");
+      } catch {
+        // 快照失败不阻塞正常流程
+      }
+    }
 
     // 复用 core/agent-loop — 同一份决策循环
     const result = await executeAgentLoop({

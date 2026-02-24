@@ -18,10 +18,64 @@ import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
 
 /**
- * 安全地查询 DOM 元素，返回匹配的元素或错误信息。
+ * 通过快照 ref（XPath 路径）解析到 DOM 元素。
+ *
+ * ref 格式示例：/body/div[1]/main/form/input[2]
+ * 每段为 tagName，可选 [n] 表示同标签兄弟中第 n 个（1-based）。
+ */
+function resolveRef(ref: string): Element | null {
+  const segments = ref.split("/").filter(Boolean);
+  let current: Element | null = document.documentElement; // <html>
+
+  for (const seg of segments) {
+    if (!current) return null;
+
+    // 解析 "tag" 或 "tag[n]"
+    const match = seg.match(/^([a-z0-9-]+)(?:\[(\d+)\])?$/i);
+    if (!match) return null;
+
+    const tag = match[1].toUpperCase();
+    const index = match[2] ? parseInt(match[2], 10) : 1; // 默认第 1 个
+
+    // 如果当前元素就是目标标签（如 body 段匹配 document.body）
+    if (current.tagName === tag) continue;
+
+    // 在子元素中按标签名过滤并取第 index 个
+    const children: Element[] = Array.from(current.children).filter((c) => c.tagName === tag);
+    const sameTagCount = children.length;
+
+    if (sameTagCount === 0) return null;
+
+    // 如果同标签只有一个，无论 index 是什么都取它
+    if (sameTagCount === 1) {
+      current = children[0];
+    } else {
+      // 多个同标签兄弟，index 是 1-based
+      if (index < 1 || index > sameTagCount) return null;
+      current = children[index - 1];
+    }
+  }
+
+  return current;
+}
+
+/**
+ * 安全地查询 DOM 元素。
+ *
+ * 支持两种定位方式：
+ * - ref 路径（以 "/" 开头）：使用快照生成的 XPath 精确定位
+ * - CSS 选择器（其他）：传统 querySelector
  */
 function queryElement(selector: string): Element | string {
   try {
+    // 以 "/" 开头视为快照 ref（XPath 路径）
+    if (selector.startsWith("/")) {
+      const el = resolveRef(selector);
+      if (!el) return `未找到 ref "${selector}" 对应的元素`;
+      return el;
+    }
+
+    // 否则走 CSS 选择器
     const el = document.querySelector(selector);
     if (!el) return `未找到匹配 "${selector}" 的元素`;
     return el;
@@ -38,13 +92,38 @@ function dispatchInputEvents(el: HTMLInputElement | HTMLTextAreaElement): void {
   el.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
 }
 
+/**
+ * 生成元素的可读描述，用于在操作结果中展示实际命中的 DOM 节点。
+ * 格式：<tag#id.class> "文本" [attr=val, ...]
+ */
+function describeElement(el: Element): string {
+  const tag = el.tagName.toLowerCase();
+  const id = el.id ? `#${el.id}` : "";
+  const cls = el.className && typeof el.className === "string"
+    ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).map(c => `.${c}`).join("")
+    : "";
+  const text = el.textContent?.trim().slice(0, 40) ?? "";
+  const textHint = text ? ` "${text}"` : "";
+
+  // 关键属性
+  const hints: string[] = [];
+  for (const attr of ["type", "name", "placeholder", "href", "role"]) {
+    const val = el.getAttribute(attr);
+    if (val) hints.push(`${attr}=${val}`);
+  }
+  const attrHint = hints.length > 0 ? ` [${hints.join(", ")}]` : "";
+
+  return `<${tag}${id}${cls}>${textHint}${attrHint}`;
+}
+
 export function createDomTool(): ToolDefinition {
   return {
     name: "dom",
     description: [
       "Perform DOM operations on the current page.",
       "Actions: click, fill, type, get_text, get_attr, set_attr, add_class, remove_class.",
-      "All actions require a CSS selector to target the element.",
+      "Use the ref path from the DOM snapshot (e.g. /body/main/button) as selector to precisely target elements.",
+      "CSS selectors are also supported but ref paths are preferred for accuracy.",
     ].join(" "),
 
     schema: Type.Object({
@@ -52,7 +131,7 @@ export function createDomTool(): ToolDefinition {
         description:
           "DOM action: click | fill | type | get_text | get_attr | set_attr | add_class | remove_class",
       }),
-      selector: Type.String({ description: "CSS selector to target the element" }),
+      selector: Type.String({ description: "Element ref path from snapshot (e.g. /body/main/button[2]) or CSS selector" }),
       value: Type.Optional(
         Type.String({ description: "Value for fill/type/set_attr actions" }),
       ),
@@ -86,7 +165,7 @@ export function createDomTool(): ToolDefinition {
             } else {
               el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
             }
-            return { content: `已点击 "${selector}"` };
+            return { content: `已点击 ${describeElement(el)}` };
           }
 
           case "fill": {
@@ -105,7 +184,7 @@ export function createDomTool(): ToolDefinition {
             } else {
               return { content: `"${selector}" 不是可编辑元素` };
             }
-            return { content: `已填写 "${selector}": "${value}"` };
+            return { content: `已填写 ${describeElement(el)}: "${value}"` };
           }
 
           case "type": {
@@ -131,7 +210,7 @@ export function createDomTool(): ToolDefinition {
                 new KeyboardEvent("keyup", { key: char, bubbles: true }),
               );
             }
-            return { content: `已逐字输入到 "${selector}": "${value}"` };
+            return { content: `已逐字输入到 ${describeElement(el)}: "${value}"` };
           }
 
           // ─── 读取类 ───
@@ -139,7 +218,7 @@ export function createDomTool(): ToolDefinition {
           case "get_text": {
             // 获取元素的文本内容（包括子元素）
             const text = el.textContent?.trim() ?? "";
-            return { content: text || "(空)" };
+            return { content: `${describeElement(el)} 的文本内容：${text || "(空)"}` };
           }
 
           case "get_attr": {
@@ -147,7 +226,7 @@ export function createDomTool(): ToolDefinition {
             const attribute = params.attribute as string;
             if (!attribute) return { content: "缺少 attribute 参数" };
             const attrValue = el.getAttribute(attribute);
-            return { content: attrValue ?? `属性 "${attribute}" 不存在` };
+            return { content: `${describeElement(el)} 的 ${attribute} = ${attrValue ?? "(不存在)"}` };
           }
 
           // ─── 修改类 ───
@@ -159,7 +238,7 @@ export function createDomTool(): ToolDefinition {
             if (!attribute || value === undefined)
               return { content: "缺少 attribute 或 value 参数" };
             el.setAttribute(attribute, value);
-            return { content: `已设置 "${selector}" 的 ${attribute}="${value}"` };
+            return { content: `已设置 ${describeElement(el)} 的 ${attribute}="${value}"` };
           }
 
           case "add_class": {
@@ -167,7 +246,7 @@ export function createDomTool(): ToolDefinition {
             const className = params.className as string;
             if (!className) return { content: "缺少 className 参数" };
             el.classList.add(className);
-            return { content: `已添加 class "${className}" 到 "${selector}"` };
+            return { content: `已添加 class "${className}" 到 ${describeElement(el)}` };
           }
 
           case "remove_class": {
@@ -175,7 +254,7 @@ export function createDomTool(): ToolDefinition {
             const className = params.className as string;
             if (!className) return { content: "缺少 className 参数" };
             el.classList.remove(className);
-            return { content: `已移除 "${selector}" 的 class "${className}"` };
+            return { content: `已移除 ${describeElement(el)} 的 class "${className}"` };
           }
 
           default:

@@ -29,7 +29,16 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
   sections.push(
     "You are AutoPilot, an AI agent embedded in the user's web page.\n" +
     "You can interact with the page by clicking elements, filling forms, reading content, and executing JavaScript.\n" +
-    "Always confirm destructive actions with the user before executing."
+    "Always confirm destructive actions with the user before executing.\n\n" +
+    "## 操作策略\n\n" +
+    "每次用户请求操作页面时，系统会自动附上当前页面的 DOM 快照。\n" +
+    "快照中每个元素都带有 ref 属性（基于层级位置的唯一路径，如 /body/main/form/button）。\n" +
+    "请严格遵循以下流程：\n" +
+    "1. 分析快照，理解页面结构和元素层级关系。\n" +
+    "2. 从快照中找到目标元素，复制其 ref 路径。\n" +
+    "3. 将 ref 路径作为 dom 工具的 selector 参数传入。\n" +
+    "4. **禁止**猜测 CSS 选择器（如 'button'、'#id'、'.class'），必须使用快照中的 ref 路径。\n" +
+    "5. 规划操作步骤后，按顺序逐步执行。"
   );
 
   // 工具列表
