@@ -18,6 +18,15 @@ const inputEl = document.getElementById("input") as HTMLInputElement;
 const sendBtn = document.getElementById("send") as HTMLButtonElement;
 const tokenEl = document.getElementById("token") as HTMLInputElement;
 const modelEl = document.getElementById("model") as HTMLSelectElement;
+
+// ─── 底部聊天面板折叠/展开 ───
+const chatDockToggle = document.getElementById("chatDockToggle")!;
+let chatDockExpanded = true;
+chatDockToggle.addEventListener("click", () => {
+  chatDockExpanded = !chatDockExpanded;
+  chatEl.style.display = chatDockExpanded ? "" : "none";
+  chatDockToggle.textContent = chatDockExpanded ? "▼ 收起聊天 ▼" : "▲ 展开聊天 ▲";
+});
 const dryrunEl = document.getElementById("dryrun") as HTMLInputElement;
 const memoryEl = document.getElementById("memory") as HTMLInputElement;
 const statusEl = document.getElementById("status")!;
@@ -450,3 +459,24 @@ function renderEmployeeTable(): void {
     })
     .join("");
 }
+
+// ─── 快照优化测试：生成大量列表项 ───
+function setupSnapshotTest(): void {
+  const list = document.getElementById("massiveList");
+  if (!list) return;
+
+  for (let i = 1; i <= 50; i++) {
+    const li = document.createElement("li");
+    li.style.cssText =
+      "padding:6px 10px; background:#17172a; border:1px solid #2a2a4a; border-radius:6px; font-size:12px; color:#999;";
+    li.innerHTML = `
+      <div>
+        <div>
+          <span>项目 #${i}</span>
+        </div>
+      </div>
+    `;
+    list.appendChild(li);
+  }
+}
+setupSnapshotTest();

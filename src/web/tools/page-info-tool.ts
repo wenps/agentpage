@@ -15,6 +15,24 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
 
+/** 快照配置选项 */
+export type SnapshotOptions = {
+  /** 最大遍历深度（默认 6） */
+  maxDepth?: number;
+  /**
+   * 视口裁剪：只保留与视口相交的元素（默认 true）。
+   * 开启后，完全在视口外的元素会被跳过，大幅减少 token 消耗。
+   * 注意：祖先容器即使自身不在视口内，只要有子元素在视口内就会保留。
+   */
+  viewportOnly?: boolean;
+  /**
+   * 智能剪枝：折叠无意义的纯布局容器（默认 true）。
+   * 开启后，没有文本、没有 id、没有交互属性的纯布局元素（div/span/section 等）
+   * 如果自身无意义，会被折叠——子元素直接提升到父级输出，减少嵌套噪音。
+   */
+  pruneLayout?: boolean;
+};
+
 /**
  * 生成页面 DOM 快照 — 将 DOM 树转为 AI 可理解的文本描述。
  *
@@ -39,11 +57,36 @@ import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js
  * - placeholder：输入框的占位文本
  * - 事件绑定：onclick/onchange 等内联事件处理器
  * - 状态属性：disabled/checked/readonly/required 等
+ *
+ * @param root - 快照根元素（默认 document.body）
+ * @param options - 快照选项对象，或传入数字作为 maxDepth（向后兼容）
  */
-export function generateSnapshot(root: Element = document.body, maxDepth = 6): string {
+export function generateSnapshot(
+  root: Element = document.body,
+  options: SnapshotOptions | number = {},
+): string {
+  // 向后兼容：数字参数视为 maxDepth
+  const opts: SnapshotOptions = typeof options === "number"
+    ? { maxDepth: options }
+    : options;
+
+  const maxDepth = opts.maxDepth ?? 6;
+  const viewportOnly = opts.viewportOnly ?? true;
+  const pruneLayout = opts.pruneLayout ?? true;
+
   const SKIP_TAGS = new Set([
     "SCRIPT", "STYLE", "SVG", "NOSCRIPT", "LINK", "META", "BR", "HR",
   ]);
+
+  /** 纯布局容器标签 — 智能剪枝时可能被折叠 */
+  const LAYOUT_TAGS = new Set([
+    "DIV", "SPAN", "SECTION", "ARTICLE", "ASIDE", "MAIN",
+    "HEADER", "FOOTER", "NAV", "FIGURE", "FIGCAPTION",
+  ]);
+
+  /** 视口尺寸（viewportOnly 开启时使用） */
+  const vpWidth = viewportOnly ? window.innerWidth : 0;
+  const vpHeight = viewportOnly ? window.innerHeight : 0;
 
   const INTERACTIVE_ATTRS = [
     "href", "type", "placeholder", "value", "name", "role", "aria-label",
@@ -73,6 +116,47 @@ export function generateSnapshot(root: Element = document.body, maxDepth = 6): s
     return `[${siblings.indexOf(el) + 1}]`;
   }
 
+  /**
+   * 判断元素是否与视口相交（部分可见也算）。
+   * 对根级容器（depth <= 1）始终返回 true，确保不丢失顶层结构。
+   */
+  function isInViewport(el: Element, depth: number): boolean {
+    if (!viewportOnly) return true;
+    // 根级容器始终保留（body/html 等），否则整棵树会被跳过
+    if (depth <= 1) return true;
+    const rect = el.getBoundingClientRect();
+    // 元素完全在视口外则跳过
+    if (rect.bottom < 0 || rect.top > vpHeight) return false;
+    if (rect.right < 0 || rect.left > vpWidth) return false;
+    // 零尺寸元素（如隐藏的 position:absolute 元素）也跳过
+    if (rect.width === 0 && rect.height === 0) return false;
+    return true;
+  }
+
+  /**
+   * 判断元素是否为「无意义布局容器」（智能剪枝候选）。
+   * 满足所有条件时返回 true：
+   * 1. 标签是常见布局容器（div/span/section 等）
+   * 2. 没有 id
+   * 3. 没有交互属性（href/role/aria-label/onclick 等）
+   * 4. 没有直接文本内容
+   */
+  function isEmptyLayoutContainer(el: Element, directText: string): boolean {
+    if (!pruneLayout) return false;
+    if (!LAYOUT_TAGS.has(el.tagName)) return false;
+    // 有 id 的元素可能是重要锚点
+    if (el.getAttribute("id")) return false;
+    // 有 role/aria-label 的元素有语义
+    if (el.getAttribute("role") || el.getAttribute("aria-label")) return false;
+    // 有内联事件（onclick 等）的元素有交互
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.startsWith("on")) return false;
+    }
+    // 有直接文本内容的元素有意义
+    if (directText) return false;
+    return true;
+  }
+
   function walk(el: Element, depth: number, parentPath: string): string {
     if (depth > maxDepth) return "";
     if (SKIP_TAGS.has(el.tagName)) return "";
@@ -80,6 +164,10 @@ export function generateSnapshot(root: Element = document.body, maxDepth = 6): s
     // 跳过不可见元素
     const style = window.getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden") return "";
+
+    // ─── 视口裁剪 ───
+    // 检查元素是否在视口内（viewportOnly 关闭时始终通过）
+    if (!isInViewport(el, depth)) return "";
 
     const indent = "  ".repeat(depth);
     const tag = el.tagName.toLowerCase();
@@ -151,6 +239,19 @@ export function generateSnapshot(root: Element = document.body, maxDepth = 6): s
       }
     }
     directText = directText.trim();
+
+    // ─── 智能剪枝 ───
+    // 无意义布局容器：不输出自身行，直接将子元素提升到当前层级
+    if (isEmptyLayoutContainer(el, directText)) {
+      const childLines: string[] = [];
+      for (let i = 0; i < el.children.length; i++) {
+        // 子元素使用当前元素的完整路径（保证 ref 路径正确），但不增加缩进
+        const childResult = walk(el.children[i], depth, currentPath);
+        if (childResult) childLines.push(childResult);
+      }
+      // 如果子树也全部为空，整个容器就被剪掉
+      return childLines.join("\n");
+    }
 
     // 构建当前元素描述：[标签] "文本" 属性 ref="XPath"
     let line = `${indent}[${tag}]`;
@@ -226,6 +327,12 @@ export function createPageInfoTool(): ToolDefinition {
       maxDepth: Type.Optional(
         Type.Number({ description: "Max depth for snapshot (default: 6)" }),
       ),
+      viewportOnly: Type.Optional(
+        Type.Boolean({ description: "Only snapshot elements visible in viewport (default: true)" }),
+      ),
+      pruneLayout: Type.Optional(
+        Type.Boolean({ description: "Collapse empty layout containers like div/span (default: true)" }),
+      ),
     }),
 
     execute: async (params): Promise<ToolCallResult> => {
@@ -262,7 +369,13 @@ export function createPageInfoTool(): ToolDefinition {
           case "snapshot": {
             // 生成 DOM 快照 — AI 理解当前页面结构的主要方式
             const maxDepth = (params.maxDepth as number) ?? 6;
-            const snapshot = generateSnapshot(document.body, maxDepth);
+            const viewportOnly = (params.viewportOnly as boolean) ?? true;
+            const pruneLayout = (params.pruneLayout as boolean) ?? true;
+            const snapshot = generateSnapshot(document.body, {
+              maxDepth,
+              viewportOnly,
+              pruneLayout,
+            });
             return { content: snapshot };
           }
 

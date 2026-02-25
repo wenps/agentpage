@@ -38,7 +38,7 @@ import type { AIClient } from "../core/types.js";
 import { ToolRegistry, type ToolDefinition } from "../core/tool-registry.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { registerWebTools } from "./tools/register.js";
-import { generateSnapshot } from "./tools/page-info-tool.js";
+import { generateSnapshot, type SnapshotOptions } from "./tools/page-info-tool.js";
 
 // ─── 回调类型 ───
 
@@ -81,6 +81,8 @@ export type WebAgentOptions = {
   memory?: boolean;
   /** 是否在每次对话前自动生成页面快照（默认 true） */
   autoSnapshot?: boolean;
+  /** 快照选项（视口裁剪、智能剪枝等，autoSnapshot 开启时生效） */
+  snapshotOptions?: SnapshotOptions;
 };
 
 // ─── WebAgent 类 ───
@@ -102,6 +104,8 @@ export class WebAgent {
   private history: AIMessage[] = [];
   /** 自动快照开关 */
   private autoSnapshot: boolean;
+  /** 快照选项 */
+  private snapshotOptions: SnapshotOptions;
 
   /** 工具注册表实例 — 每个 WebAgent 拥有独立的工具集 */
   private registry = new ToolRegistry();
@@ -120,6 +124,7 @@ export class WebAgent {
     this.customSystemPrompt = options.systemPrompt;
     this.memory = options.memory ?? false;
     this.autoSnapshot = options.autoSnapshot ?? true;
+    this.snapshotOptions = options.snapshotOptions ?? {};
   }
 
   // ─── 工具管理 ───
@@ -197,6 +202,16 @@ export class WebAgent {
     return this.autoSnapshot;
   }
 
+  /** 设置快照选项（视口裁剪、智能剪枝等） */
+  setSnapshotOptions(options: SnapshotOptions): void {
+    this.snapshotOptions = options;
+  }
+
+  /** 获取当前快照选项 */
+  getSnapshotOptions(): SnapshotOptions {
+    return { ...this.snapshotOptions };
+  }
+
   /** 清空对话历史（不影响记忆开关） */
   clearHistory(): void {
     this.history = [];
@@ -225,7 +240,10 @@ export class WebAgent {
     // ─── 自动快照：注入 system prompt，不污染对话历史 ───
     if (this.autoSnapshot) {
       try {
-        const snapshot = generateSnapshot(document.body, 8);
+        const snapshot = generateSnapshot(document.body, {
+          maxDepth: 8,
+          ...this.snapshotOptions,
+        });
         this.callbacks.onSnapshot?.(snapshot);
 
         systemPrompt += [

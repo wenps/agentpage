@@ -11,10 +11,36 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #0f0f0f;
       color: #e0e0e0;
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
     }
+
+    /* ─── 底部固定的聊天区 ─── */
+    .chat-dock {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 900;
+      display: flex;
+      flex-direction: column;
+      max-height: 50vh;
+      background: #0f0f0f;
+      border-top: 2px solid #2a2a4a;
+    }
+    .chat-dock-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px;
+      background: #1a1a2e;
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+      color: #888;
+    }
+    .chat-dock-toggle:hover { background: #25254a; color: #ddd; }
 
     /* ─── 顶部栏 ─── */
     header {
@@ -204,10 +230,11 @@
     #chat {
       flex: 1;
       overflow-y: auto;
-      padding: 16px 20px;
+      padding: 12px 20px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
+      min-height: 0;
     }
 
     .msg {
@@ -413,21 +440,123 @@
     </div>
   </section>
 
-  <div id="chat"></div>
+  <!-- ─── 快照优化测试区域 ─── -->
+  <section id="snapshotTestArea" style="border-top: 2px solid #4a5cff; margin-top: 0;">
 
-  <div class="test-panel">
-    <span style="color:#666;font-size:12px;line-height:28px;">快捷测试：</span>
-    <button onclick="sendQuick('获取当前页面标题和URL')">📄 页面信息</button>
-    <button onclick="sendQuick('获取页面DOM快照')">🌲 DOM快照</button>
-    <button onclick="sendQuick('点击页面上的第一个按钮')">👆 点击按钮</button>
-    <button onclick="sendQuick('获取页面上所有链接的文本')">🔗 所有链接</button>
-    <button onclick="sendQuick('把页面滚动到底部')">⬇️ 滚动底部</button>
-    <button onclick="sendQuick('执行 document.querySelectorAll(\'*\').length 看看有多少DOM节点')">📊 DOM计数</button>
-    <button onclick="clearHistory()">🗑️ 清空记忆</button>  </div>
+    <!-- 测试1: 深层无意义嵌套（智能剪枝测试） -->
+    <div>
+      <div>
+        <div>
+          <div>
+            <div>
+              <div>
+                <button id="deepNestedBtn" onclick="alert('深层按钮被点击')">🎯 深层嵌套按钮</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-  <div class="input-area">
-    <input type="text" id="input" placeholder="输入指令，让 AI 操作当前页面..." />
-    <button id="send">发送</button>
+    <!-- 测试2: 大量空布局容器（剪枝测试） -->
+    <div>
+      <div>
+        <div></div>
+        <div>
+          <div></div>
+          <div>
+            <span></span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 测试3: 布局容器混合有意义内容 -->
+    <div>
+      <div>
+        <div>
+          <h3 style="color:#b9bfff; padding:8px 20px;">📐 剪枝测试：下面的按钮应该被保留，外层空 div 应该被折叠</h3>
+        </div>
+        <div>
+          <div>
+            <input id="pruneTestInput" type="text" placeholder="剪枝测试输入框" style="margin:4px 20px; padding:6px; background:#1e1e3a; border:1px solid #333; color:#ddd; border-radius:4px;" />
+          </div>
+          <div>
+            <div>
+              <button id="pruneTestBtn" style="margin:4px 20px; padding:6px 12px; background:#25254a; color:#ddd; border:1px solid #3a3a62; border-radius:6px; cursor:pointer;">剪枝测试按钮</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 测试4: 超高内容区（视口裁剪测试） -->
+    <div style="padding: 12px 20px;">
+      <h3 style="color:#b9bfff; margin-bottom:8px;">📏 视口裁剪测试：以下区域高度 3000px，大部分在视口外</h3>
+      <p style="color:#888; font-size:12px; margin-bottom:12px;">只有视口内可见的元素应出现在快照中，滚动后快照内容会变化。</p>
+    </div>
+    <div style="height: 3000px; background: linear-gradient(180deg, #1a1a2e 0%, #0a0a15 100%); position: relative; padding: 20px;">
+      <!-- 顶部（通常可见） -->
+      <div style="position: absolute; top: 20px; left: 20px; right: 20px;">
+        <button id="vpTop" style="padding:8px 16px; background:#4a5cff; color:#fff; border:none; border-radius:6px; cursor:pointer;">🔝 顶部按钮（应该可见）</button>
+        <span style="color:#4caf50; margin-left:12px; font-size:13px;">← 这个应该出现在快照中</span>
+      </div>
+
+      <!-- 中部（可能不可见） -->
+      <div style="position: absolute; top: 1000px; left: 20px; right: 20px;">
+        <button id="vpMiddle" style="padding:8px 16px; background:#ff9800; color:#fff; border:none; border-radius:6px; cursor:pointer;">🔄 中部按钮（1000px处）</button>
+        <span style="color:#ff9800; margin-left:12px; font-size:13px;">← 需要滚动才能看到</span>
+      </div>
+
+      <!-- 底部（几乎不可见） -->
+      <div style="position: absolute; top: 2000px; left: 20px; right: 20px;">
+        <button id="vpBottom" style="padding:8px 16px; background:#e74c3c; color:#fff; border:none; border-radius:6px; cursor:pointer;">🔚 底部按钮（2000px处）</button>
+        <span style="color:#e74c3c; margin-left:12px; font-size:13px;">← 远在视口外</span>
+      </div>
+
+      <!-- 最底部 -->
+      <div style="position: absolute; bottom: 20px; left: 20px; right: 20px;">
+        <p id="vpEnd" style="color:#666; font-size:12px;">📍 这是 3000px 高度区域的底部，视口裁剪开启时不应出现在快照中。</p>
+      </div>
+    </div>
+
+    <!-- 测试5: 大量重复列表项（token 消耗测试） -->
+    <div style="padding: 12px 20px;">
+      <h3 style="color:#b9bfff; margin-bottom:8px;">📋 重复列表测试：50 个列表项</h3>
+    </div>
+    <div style="padding: 0 20px 20px;">
+      <ul id="massiveList" style="list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px;">
+      </ul>
+    </div>
+
+  </section>
+
+  <!-- 底部留白，防止内容被固定聊天区遮挡 -->
+  <div style="height: 260px;"></div>
+
+  <!-- ─── 固定在底部的聊天区 ─── -->
+  <div class="chat-dock" id="chatDock">
+    <div class="chat-dock-toggle" id="chatDockToggle">▲ 聊天面板 ▲</div>
+    <div id="chat"></div>
+    <div class="test-panel">
+      <span style="color:#666;font-size:12px;line-height:28px;">快捷测试：</span>
+      <button onclick="sendQuick('获取当前页面标题和URL')">📄 页面信息</button>
+      <button onclick="sendQuick('获取页面DOM快照')">🌲 DOM快照</button>
+      <button onclick="sendQuick('点击页面上的第一个按钮')">👆 点击按钮</button>
+      <button onclick="sendQuick('获取页面上所有链接的文本')">🔗 所有链接</button>
+      <button onclick="sendQuick('把页面滚动到底部')">⬇️ 滚动底部</button>
+      <button onclick="sendQuick('执行 document.querySelectorAll(\'*\').length 看看有多少DOM节点')">📊 DOM计数</button>
+      <button onclick="clearHistory()">🗑️ 清空记忆</button>
+    </div>
+    <div class="input-area">
+      <input type="text" id="input" placeholder="输入指令，让 AI 操作当前页面..." />
+      <button id="send">发送</button>
+    </div>
   </div>
 
   <div class="modal-mask" id="taskModalMask" aria-hidden="true">
