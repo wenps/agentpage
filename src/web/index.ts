@@ -31,9 +31,10 @@ import {
   executeAgentLoop,
   type AgentLoopCallbacks,
   type AgentLoopResult,
-} from "../core/agent-loop.js";
+} from "../core/agent-loop/index.js";
 import type { AIMessage } from "../core/types.js";
-import { createAIClient, type AIClientConfig } from "../core/ai-client.js";
+import { createAIClient, type AIClientConfig } from "../core/ai-client/index.js";
+import type { AIClient } from "../core/types.js";
 import { ToolRegistry, type ToolDefinition } from "../core/tool-registry.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { registerWebTools } from "./tools/register.js";
@@ -50,8 +51,20 @@ export type WebAgentCallbacks = AgentLoopCallbacks & {
 // ─── 配置 ───
 
 export type WebAgentOptions = {
+  /**
+   * 自定义 AI 客户端实例（可选）。
+   *
+   * 传入后将直接使用该实例进行对话，忽略 token / provider / model / baseURL。
+   * 支持 BaseAIClient 或任何实现 AIClient 接口的对象。
+   *
+   * ```ts
+   * const client = new BaseAIClient({ chatHandler: async (params) => { ... } });
+   * const agent = new WebAgent({ client });
+   * ```
+   */
+  client?: AIClient;
   /** API 认证 Token (GitHub PAT / OpenAI key / Anthropic key) */
-  token: string;
+  token?: string;
   /** AI 提供商: "copilot" | "openai" | "anthropic"（默认 "copilot"） */
   provider?: string;
   /** 模型名称（默认 "gpt-4o"） */
@@ -73,6 +86,8 @@ export type WebAgentOptions = {
 // ─── WebAgent 类 ───
 
 export class WebAgent {
+  /** 用户传入的自定义 AI 客户端实例（优先级高于 token/provider） */
+  private client?: AIClient;
   private token: string;
   private provider: string;
   private model: string;
@@ -95,7 +110,8 @@ export class WebAgent {
   callbacks: WebAgentCallbacks = {};
 
   constructor(options: WebAgentOptions) {
-    this.token = options.token;
+    this.client = options.client;
+    this.token = options.token ?? "";
     this.provider = options.provider ?? "copilot";
     this.model = options.model ?? "gpt-4o";
     this.baseURL = options.baseURL;
@@ -128,6 +144,16 @@ export class WebAgent {
   /** 设置 API Token */
   setToken(token: string): void {
     this.token = token;
+  }
+
+  /**
+   * 设置自定义 AI 客户端实例。
+   *
+   * 传入后将优先使用该实例进行对话，忽略 token / provider / model / baseURL。
+   * 传入 undefined 可恢复使用内置客户端。
+   */
+  setClient(client: AIClient | undefined): void {
+    this.client = client;
   }
 
   /** 设置 AI 提供商 */
@@ -188,17 +214,8 @@ export class WebAgent {
    * 4. callbacks → 实时通知 UI
    */
   async chat(message: string): Promise<AgentLoopResult> {
-    if (!this.token) {
-      throw new Error("未设置 Token，请先调用 setToken()");
-    }
-
-    // 复用 core/ai-client — 同一份 fetch 实现
-    const client = createAIClient({
-      provider: this.provider,
-      model: this.model,
-      apiKey: this.token,
-      baseURL: this.baseURL,
-    });
+    // 优先使用自定义 client，否则使用内置 createAIClient
+    const client = this.client ?? this.createBuiltinClient();
 
     // 复用 core/system-prompt 或使用自定义
     let systemPrompt =
@@ -248,5 +265,24 @@ export class WebAgent {
     }
 
     return result;
+  }
+
+  // ─── 内部方法 ───
+
+  /**
+   * 创建内置 AI 客户端（基于 token / provider / model 配置）。
+   *
+   * @throws 未设置 token 时抛出 Error
+   */
+  private createBuiltinClient(): AIClient {
+    if (!this.token) {
+      throw new Error("未设置 Token，请先调用 setToken() 或传入自定义 client");
+    }
+    return createAIClient({
+      provider: this.provider,
+      model: this.model,
+      apiKey: this.token,
+      baseURL: this.baseURL,
+    });
   }
 }

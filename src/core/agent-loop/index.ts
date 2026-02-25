@@ -15,12 +15,12 @@
  * - types.ts       → 类型定义（import type，零运行时）
  * - tool-registry.ts → ToolRegistry 实例（注入式，非全局）
  */
-import type { AIClient, AIMessage } from "./types.js";
-import { ToolRegistry, type ToolCallResult } from "./tool-registry.js";
+import type { AIClient, AIMessage } from "../types.js";
+import { ToolRegistry, type ToolCallResult } from "../tool-registry.js";
 import {
   DEFAULT_ACTION_RECOVERY_ROUNDS,
   DEFAULT_MAX_ROUNDS,
-} from "./agent-loop/constants.js";
+} from "./constants.js";
 import {
   buildToolCallKey,
   buildToolTrace,
@@ -33,7 +33,7 @@ import {
   sleep,
   toContentString,
   type ToolTraceEntry,
-} from "./agent-loop/helpers.js";
+} from "./helpers.js";
 
 // ─── 回调接口 ───
 
