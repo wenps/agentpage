@@ -105,10 +105,11 @@ let sortField: "name" | "status" | "createdAt" = "createdAt";
 let sortDirection: "asc" | "desc" = "desc";
 
 // ─── 创建 Agent 实例 ───
-// baseURL 使用 Vite proxy 路径，代理到 GitHub Models API
+// baseURL 使用 Vite proxy 路径，代理到 DeepSeek API
 const agent = new WebAgent({
-  token: import.meta.env.GITHUB_TOKEN ?? "",
-  provider: "copilot",
+  token: import.meta.env.DEEPSEEK_TOKEN ?? "",
+  provider: "deepseek",
+  model: "deepseek-chat",
   baseURL: "/api",
 });
 agent.registerTools(); // 注册内置 Web 工具

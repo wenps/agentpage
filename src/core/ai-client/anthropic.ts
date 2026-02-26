@@ -77,15 +77,19 @@ export class AnthropicClient extends BaseAIClient {
   protected config: AIClientConfig;
 
   constructor(config: AIClientConfig) {
-    // 注入 chatHandler — 实现 buildRequest → fetch → parseResponse 的完整流程
+    // 注入 chatHandler — 流式传输，减少首字节延迟，提升响应速度
     super({
       chatHandler: async (params: ChatHandlerParams): Promise<AIChatResponse> => {
         const req = buildAnthropicRequest(this.config, params);
 
+        // 启用流式传输 — 边生成边接收，避免等待完整响应
+        const body = JSON.parse(req.body) as Record<string, unknown>;
+        body.stream = true;
+
         const res = await fetch(req.url, {
           method: req.method,
           headers: req.headers,
-          body: req.body,
+          body: JSON.stringify(body),
         });
 
         if (!res.ok) {
@@ -93,8 +97,7 @@ export class AnthropicClient extends BaseAIClient {
           throw new Error(`AI API ${res.status}: ${errText.slice(0, 500)}`);
         }
 
-        const data = await res.json();
-        return parseAnthropicResponse(data);
+        return parseAnthropicStream(res);
       },
     });
     this.config = config;
@@ -249,4 +252,113 @@ function convertMessages(
             : JSON.stringify(m.content),
       };
     });
+}
+
+// ─── 流式响应解析 ───
+
+/**
+ * 从 Anthropic SSE 流解析为统一的 AIChatResponse。
+ *
+ * Anthropic 流式事件类型：
+ * - message_start       → 消息骨架 + input_tokens
+ * - content_block_start  → 新内容块（text 或 tool_use）
+ * - content_block_delta  → 增量内容（text_delta 或 input_json_delta）
+ * - content_block_stop   → 内容块结束
+ * - message_delta        → output_tokens + stop_reason
+ * - message_stop         → 消息结束
+ *
+ * 如果 response.body 不可用，自动回退到非流式解析。
+ */
+export async function parseAnthropicStream(response: Response): Promise<AIChatResponse> {
+  // 回退：无 ReadableStream 支持
+  if (!response.body) {
+    const data = await response.json();
+    return parseAnthropicResponse(data);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  let text = "";
+  const toolCalls: AIToolCall[] = [];
+  let currentToolUse: { id: string; name: string; inputJson: string } | null = null;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // 跳过空行、注释行、event 行（只处理 data 行）
+      if (!trimmed || trimmed.startsWith(":") || trimmed.startsWith("event:")) continue;
+      if (!trimmed.startsWith("data: ")) continue;
+
+      try {
+        const event = JSON.parse(trimmed.slice(6)) as Record<string, unknown>;
+
+        switch (event.type) {
+          case "message_start": {
+            const msg = event.message as { usage?: { input_tokens?: number } } | undefined;
+            inputTokens = msg?.usage?.input_tokens ?? 0;
+            break;
+          }
+
+          case "content_block_start": {
+            const block = event.content_block as { type: string; id?: string; name?: string } | undefined;
+            if (block?.type === "tool_use") {
+              currentToolUse = { id: block.id ?? "", name: block.name ?? "", inputJson: "" };
+            }
+            break;
+          }
+
+          case "content_block_delta": {
+            const delta = event.delta as { type: string; text?: string; partial_json?: string } | undefined;
+            if (delta?.type === "text_delta") {
+              text += delta.text ?? "";
+            } else if (delta?.type === "input_json_delta" && currentToolUse) {
+              currentToolUse.inputJson += delta.partial_json ?? "";
+            }
+            break;
+          }
+
+          case "content_block_stop":
+            if (currentToolUse) {
+              try {
+                toolCalls.push({
+                  id: currentToolUse.id,
+                  name: currentToolUse.name,
+                  input: JSON.parse(currentToolUse.inputJson || "{}"),
+                });
+              } catch {
+                // 工具参数 JSON 解析失败，跳过
+              }
+              currentToolUse = null;
+            }
+            break;
+
+          case "message_delta": {
+            const deltaUsage = (event as { usage?: { output_tokens?: number } }).usage;
+            outputTokens = deltaUsage?.output_tokens ?? 0;
+            break;
+          }
+        }
+      } catch {
+        // 无效 JSON 行，跳过
+      }
+    }
+  }
+
+  return {
+    text: text || undefined,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    usage: inputTokens > 0 || outputTokens > 0 ? { inputTokens, outputTokens } : undefined,
+  };
 }

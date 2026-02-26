@@ -292,37 +292,37 @@ export function buildCompactMessages(
     const status = isError ? "❌" : "✅";
     const marker = entry.marker ? ` ${entry.marker}` : "";
     traceParts.push(
-      `${status} 步骤${i + 1}: ${entry.name}${formatToolInputBrief(entry.input)} → ${brief}${marker}`,
+      `${status} ${i + 1}. ${entry.name}${formatToolInputBrief(entry.input)} → ${brief}${marker}`,
     );
   }
   messages.push({
     role: "assistant",
-    content: `## 已完成的操作步骤（以下步骤已执行，请勿重复）\n\n${traceParts.join("\n")}`,
+    content: `Done steps (do NOT repeat):\n${traceParts.join("\n")}`,
   });
 
-  // ─── 当前页面状态 + 决策指令，作为 user 消息 ───
-  const contextParts: string[] = [
-    "以上步骤已经执行完毕。请结合用户的原始请求、已完成的步骤和下方的当前页面快照，判断下一步该做什么。",
-    "**注意：不要重复已成功（✅）的操作，只执行尚未完成的下一步。**",
-  ];
+  // ─── 当前页面状态 + 快照，作为 user 消息 ───
+  // 检查是否所有步骤都已成功（无失败）— 提示 AI 可以停止
+  const hasErrors = trace.some(e => hasToolError(e.result));
+  const contextParts: string[] = hasErrors
+    ? ["Continue. Batch all tool calls whose targets are in the snapshot. Do not repeat ✅ steps."]
+    : ["If the user's task is fully done, reply with a short summary (no tool calls). Otherwise continue with remaining steps."];
 
-  // 最近失败操作详情（帮助 AI 理解原因并调整策略）
+  // 最近失败操作详情
   const lastEntry = trace[trace.length - 1];
   if (hasToolError(lastEntry.result)) {
     const detail = toContentString(lastEntry.result.content);
     const stripped = detail.replace(SNAPSHOT_REGEX, "").trim();
-    if (stripped && stripped.length < 500) {
-      contextParts.push("", "### 最近失败操作详情", stripped);
-      contextParts.push("请换一种方式完成该步骤，或跳过该步骤继续后续操作。");
+    if (stripped && stripped.length < 300) {
+      contextParts.push("", "Last error: " + stripped);
     }
   }
 
   if (currentUrl) {
-    contextParts.push("", `当前页面：${currentUrl}`);
+    contextParts.push("", `URL: ${currentUrl}`);
   }
 
   if (latestSnapshot) {
-    contextParts.push("", "## 当前页面 DOM 快照（这是页面的真实当前状态）", wrapSnapshot(latestSnapshot));
+    contextParts.push("", "## Current DOM snapshot", wrapSnapshot(latestSnapshot));
   }
 
   messages.push({ role: "user", content: contextParts.join("\n") });

@@ -4,8 +4,8 @@
  * 统一集中在该文件，避免在主循环中散落“魔法数字”。
  */
 export const DEFAULT_MAX_ROUNDS = 10;
-export const DEFAULT_RECOVERY_WAIT_MS = 300;
-export const DEFAULT_ACTION_RECOVERY_ROUNDS = 5;
+export const DEFAULT_RECOVERY_WAIT_MS = 100;
+export const DEFAULT_ACTION_RECOVERY_ROUNDS = 2;
 // ─── DOM 快照去重标记 ───
 
 /** 快照起始标记 — 用于在消息中识别快照边界 */

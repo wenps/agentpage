@@ -3,10 +3,11 @@
  *
  * 使用原生 fetch API，浏览器天然支持，不依赖任何 SDK，零环境耦合。
  *
- * 支持三种 provider：
+ * 支持四种 provider：
  * - "openai"    → OpenAI API (https://api.openai.com/v1)
  * - "copilot"   → GitHub Models API (https://models.inference.ai.azure.com)
  * - "anthropic" → Anthropic API (https://api.anthropic.com)
+ * - "deepseek"  → DeepSeek API (https://api.deepseek.com)
  *
  * 提供两层 API：
  * - 高层：createAIClient(config) → AIClient（工厂函数，自动选择客户端类）
@@ -32,14 +33,16 @@ import type { ToolDefinition } from "../tool-registry.js";
 import { validateProvider } from "./constants.js";
 import { OpenAIClient } from "./openai.js";
 import { AnthropicClient } from "./anthropic.js";
+import { DeepSeekClient } from "./deepseek.js";
 
 // Re-export 类型，方便外部统一从 ai-client 导入
 export type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "../types.js";
 
 // Re-export 客户端类（基类 + OpenAI + Anthropic）
 export { BaseAIClient, type BaseAIClientOptions, type ChatHandlerParams } from "./custom.js";
-export { OpenAIClient } from "./openai.js";
-export { AnthropicClient } from "./anthropic.js";
+export { OpenAIClient, parseOpenAIStream } from "./openai.js";
+export { AnthropicClient, parseAnthropicStream } from "./anthropic.js";
+export { DeepSeekClient } from "./deepseek.js";
 
 // ─── 公共类型定义 ───
 
@@ -105,9 +108,11 @@ export function createAIClient(config: AIClientConfig): AIClient {
       return new OpenAIClient(config);
     case "anthropic":
       return new AnthropicClient(config);
+    case "deepseek":
+      return new DeepSeekClient(config);
     default:
       throw new Error(
-        `Unknown AI provider: ${config.provider}. Supported: openai, copilot, anthropic`,
+        `Unknown AI provider: ${config.provider}. Supported: openai, copilot, anthropic, deepseek`,
       );
   }
 }

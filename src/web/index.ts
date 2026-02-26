@@ -255,14 +255,14 @@ export class WebAgent {
     if (this.autoSnapshot) {
       try {
         const snapshot = generateSnapshot(document.body, {
-          maxDepth: 8,
+          maxDepth: 6,
           ...this.snapshotOptions,
           refStore,
         });
         this.callbacks.onSnapshot?.(snapshot);
 
         systemPrompt += wrapSnapshot(
-          `\n\n## 当前页面 DOM 快照\n\n\`\`\`\n${snapshot}\n\`\`\``,
+          `\n\n## DOM Snapshot\n\`\`\`\n${snapshot}\n\`\`\``,
         );
       } catch {
         // 快照失败不阻塞正常流程

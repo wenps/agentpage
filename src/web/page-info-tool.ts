@@ -39,6 +39,12 @@ export type SnapshotOptions = {
    * 大幅减少 token 消耗。dom-tool 通过 RefStore.get(id) 解析回 DOM 元素。
    */
   refStore?: RefStore;
+  /** 最大输出节点数（默认 220），超过后停止继续遍历。 */
+  maxNodes?: number;
+  /** 每个父节点最多输出的子元素数（默认 25），超出部分会折叠。 */
+  maxChildren?: number;
+  /** 文本截断长度（默认 40）。 */
+  maxTextLength?: number;
 };
 
 /**
@@ -73,6 +79,12 @@ export function generateSnapshot(
   const maxDepth = opts.maxDepth ?? 6;
   const viewportOnly = opts.viewportOnly ?? true;
   const pruneLayout = opts.pruneLayout ?? true;
+  const maxNodes = opts.maxNodes ?? 220;
+  const maxChildren = opts.maxChildren ?? 25;
+  const maxTextLength = opts.maxTextLength ?? 40;
+
+  let emittedNodes = 0;
+  let truncatedByNodeBudget = false;
 
   const refStore = opts.refStore;
 
@@ -92,18 +104,18 @@ export function generateSnapshot(
 
   const INTERACTIVE_ATTRS = [
     "href", "type", "placeholder", "value", "name", "role", "aria-label",
-    "src", "alt", "title", "for", "action", "method", "target", "min", "max",
-    "pattern", "maxlength", "tabindex",
+    "src", "alt", "title", "for", "action", "method",
   ];
+
+  const INTERACTIVE_TAGS = new Set([
+    "A", "BUTTON", "INPUT", "TEXTAREA", "SELECT", "OPTION", "LABEL", "SUMMARY",
+  ]);
 
   /** 布尔状态属性 — 只在存在时输出（无值），如 disabled、checked */
   const BOOLEAN_ATTRS = [
     "disabled", "checked", "readonly", "required", "selected",
-    "hidden", "multiple", "autofocus", "open",
+    "hidden",
   ];
-
-  /** 内联事件属性前缀 */
-  const EVENT_PREFIX = "on";
 
   /**
    * 计算元素在父节点中同标签兄弟里的序号（1-based，XPath 规范）。
@@ -159,7 +171,21 @@ export function generateSnapshot(
     return true;
   }
 
+  function isInteractiveElement(el: Element): boolean {
+    if (INTERACTIVE_TAGS.has(el.tagName)) return true;
+    if (el.hasAttribute("onclick")) return true;
+    if (el.hasAttribute("role")) return true;
+    if (el.hasAttribute("tabindex")) return true;
+    if (el.hasAttribute("aria-label")) return true;
+    return false;
+  }
+
   function walk(el: Element, depth: number, parentPath: string): string {
+    if (emittedNodes >= maxNodes) {
+      truncatedByNodeBudget = true;
+      return "";
+    }
+
     if (depth > maxDepth) return "";
     if (SKIP_TAGS.has(el.tagName)) return "";
 
@@ -185,13 +211,12 @@ export function generateSnapshot(
     const elId = el.getAttribute("id");
     if (elId) attrs.push(`id="${elId}"`);
 
-    // 2. class — 只保留有语义的类名（过滤框架 hash 类，最多 2 个）
+    // 2. class — 只保留第 1 个有语义的类名（大幅减少 token）
     const className = el.getAttribute("class")?.trim();
     if (className) {
-      const classes = className.split(/\s+/)
-        .filter(c => c && !c.startsWith("data-v-") && c.length < 30)
-        .slice(0, 2).join(" ");
-      if (classes) attrs.push(`class="${classes}"`);
+      const cls = className.split(/\s+/)
+        .find(c => c && !c.startsWith("data-v-") && c.length < 25 && !/^[a-z]{1,2}\d|^_|^css-/.test(c));
+      if (cls) attrs.push(`class="${cls}"`);
     }
 
     // 3. 交互属性（href, type, placeholder 等）
@@ -205,27 +230,16 @@ export function generateSnapshot(
       if (el.hasAttribute(attr)) attrs.push(attr);
     }
 
-    // 5. 事件绑定 — 只检测有交互意义的事件（onclick, onchange）
-    const events: string[] = [];
-    for (const attrObj of Array.from(el.attributes)) {
-      if (attrObj.name.startsWith(EVENT_PREFIX)) {
-        events.push(attrObj.name);
-      }
-    }
-    if (events.length > 0) attrs.push(`events=[${events.join(",")}]`);
+    // 5. 事件绑定 — 只标记有 onclick（最重要的交互信号）
+    if (el.hasAttribute("onclick")) attrs.push("onclick");
 
-    // 6. data-* 属性 — 只保留有语义价值的（跳过框架 scoped 标记如 data-v-xxx）
-    const dataAttrs: string[] = [];
-    for (const attrObj of Array.from(el.attributes)) {
-      if (attrObj.name.startsWith("data-") && !attrObj.name.match(/^data-v-/) && dataAttrs.length < 2) {
-        dataAttrs.push(`${attrObj.name}="${attrObj.value.slice(0, 30)}"`);
-      }
-    }
-    if (dataAttrs.length > 0) attrs.push(...dataAttrs);
+    // 6. data-* 属性 — 只保留 data-testid（自动化测试定位用）
+    const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
+    if (testId) attrs.push(`data-testid="${testId.slice(0, 25)}"`);
 
-    // 7. 对于 input/textarea，补充当前实际 value
+    // 7. 对于 input/textarea，补充当前实际 value（截短到 40 字符）
     if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.value) {
-      const currentVal = el.value.slice(0, 60);
+      const currentVal = el.value.slice(0, 40);
       const attrVal = el.getAttribute("value");
       if (attrVal !== currentVal) {
         attrs.push(`val="${currentVal}"`);
@@ -246,19 +260,31 @@ export function generateSnapshot(
     // ─── 智能剪枝 ───
     // 无意义布局容器：不输出自身行，直接将子元素提升到当前层级
     if (isEmptyLayoutContainer(el, directText)) {
+      const allChildren = Array.from(el.children);
+      const interactiveChildren = allChildren.filter(isInteractiveElement);
+      const nonInteractiveChildren = allChildren.filter((child) => !isInteractiveElement(child));
+      const orderedChildren = [...interactiveChildren, ...nonInteractiveChildren];
+      const selectedChildren = orderedChildren.slice(0, maxChildren);
+      const omittedChildren = orderedChildren.length - selectedChildren.length;
+
       const childLines: string[] = [];
-      for (let i = 0; i < el.children.length; i++) {
+      for (let i = 0; i < selectedChildren.length; i++) {
         // 子元素继承当前路径（保证 hash 计算正确），但不增加缩进
-        const childResult = walk(el.children[i], depth, currentPath);
+        const childResult = walk(selectedChildren[i], depth, currentPath);
         if (childResult) childLines.push(childResult);
       }
+
+      if (omittedChildren > 0) {
+        childLines.push(`${"  ".repeat(depth)}... (${omittedChildren} children omitted)`);
+      }
+
       // 如果子树也全部为空，整个容器就被剪掉
       return childLines.join("\n");
     }
 
     // 构建当前元素描述：[标签] "文本" 属性 #ID
     let line = `${indent}[${tag}]`;
-    if (directText) line += ` "${directText.slice(0, 60)}"`;
+    if (directText) line += ` "${directText.slice(0, maxTextLength)}"`;
     if (attrs.length) line += ` ${attrs.join(" ")}`;
     // 使用 hash ID（如 #a1b2c）或回退到完整 XPath
     if (refStore) {
@@ -269,11 +295,23 @@ export function generateSnapshot(
     }
 
     const lines: string[] = [line];
+    emittedNodes++;
 
-    // 递归子元素
-    for (let i = 0; i < el.children.length; i++) {
-      const childResult = walk(el.children[i], depth + 1, currentPath);
+    // 递归子元素（优先保留可交互元素，再保留普通元素）
+    const allChildren = Array.from(el.children);
+    const interactiveChildren = allChildren.filter(isInteractiveElement);
+    const nonInteractiveChildren = allChildren.filter((child) => !isInteractiveElement(child));
+    const orderedChildren = [...interactiveChildren, ...nonInteractiveChildren];
+    const selectedChildren = orderedChildren.slice(0, maxChildren);
+    const omittedChildren = orderedChildren.length - selectedChildren.length;
+
+    for (let i = 0; i < selectedChildren.length; i++) {
+      const childResult = walk(selectedChildren[i], depth + 1, currentPath);
       if (childResult) lines.push(childResult);
+    }
+
+    if (omittedChildren > 0) {
+      lines.push(`${indent}  ... (${omittedChildren} children omitted)`);
     }
 
     return lines.join("\n");
@@ -281,7 +319,9 @@ export function generateSnapshot(
 
   // 根元素自身的标签作为路径起点，walk 内部不再重复追加
   // 例如 root=body 时，parentPath=""，walk 中 currentPath="/body"
-  return walk(root, 0, "") || "(空页面)";
+  const output = walk(root, 0, "") || "(空页面)";
+  if (!truncatedByNodeBudget) return output;
+  return `${output}\n... (snapshot truncated: maxNodes=${maxNodes})`;
 }
 
 /**
@@ -342,6 +382,15 @@ export function createPageInfoTool(): ToolDefinition {
       pruneLayout: Type.Optional(
         Type.Boolean({ description: "Collapse empty layout containers like div/span (default: true)" }),
       ),
+      maxNodes: Type.Optional(
+        Type.Number({ description: "Maximum nodes to include in snapshot (default: 220)" }),
+      ),
+      maxChildren: Type.Optional(
+        Type.Number({ description: "Maximum children per element (default: 25)" }),
+      ),
+      maxTextLength: Type.Optional(
+        Type.Number({ description: "Maximum text length per node (default: 40)" }),
+      ),
     }),
 
     execute: async (params): Promise<ToolCallResult> => {
@@ -380,10 +429,16 @@ export function createPageInfoTool(): ToolDefinition {
             const maxDepth = (params.maxDepth as number) ?? 6;
             const viewportOnly = (params.viewportOnly as boolean) ?? true;
             const pruneLayout = (params.pruneLayout as boolean) ?? true;
+            const maxNodes = (params.maxNodes as number) ?? 220;
+            const maxChildren = (params.maxChildren as number) ?? 25;
+            const maxTextLength = (params.maxTextLength as number) ?? 40;
             const snapshot = generateSnapshot(document.body, {
               maxDepth,
               viewportOnly,
               pruneLayout,
+              maxNodes,
+              maxChildren,
+              maxTextLength,
               refStore: getActiveRefStore(),
             });
             return { content: snapshot };

@@ -80,24 +80,57 @@ export class OpenAIClient extends BaseAIClient {
   protected config: AIClientConfig;
 
   constructor(config: AIClientConfig) {
-    // 注入 chatHandler — 实现 buildRequest → fetch → parseResponse 的完整流程
+    // 注入 chatHandler — 流式传输，减少首字节延迟，提升响应速度
     super({
       chatHandler: async (params: ChatHandlerParams): Promise<AIChatResponse> => {
         const req = buildOpenAIRequest(this.config, params);
 
-        const res = await fetch(req.url, {
+        // 先尝试流式传输（低延迟），失败时自动降级到非流式
+        const body = JSON.parse(req.body) as Record<string, unknown>;
+        const streamBody: Record<string, unknown> = {
+          ...body,
+          stream: true,
+          stream_options: { include_usage: true },
+        };
+
+        const streamRes = await fetch(req.url, {
           method: req.method,
           headers: req.headers,
-          body: req.body,
+          body: JSON.stringify(streamBody),
         });
 
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`AI API ${res.status}: ${errText.slice(0, 500)}`);
+        if (!streamRes.ok) {
+          const errText = await streamRes.text();
+          throw new Error(`AI API ${streamRes.status}: ${errText.slice(0, 500)}`);
         }
 
-        const data = await res.json();
-        return parseOpenAIResponse(data);
+        const contentType = streamRes.headers.get("content-type") ?? "";
+        if (contentType.includes("application/json")) {
+          const data = await streamRes.json();
+          return parseOpenAIResponse(data);
+        }
+
+        try {
+          const parsed = await parseOpenAIStream(streamRes, 20000);
+          if (parsed.text || (parsed.toolCalls && parsed.toolCalls.length > 0)) {
+            return parsed;
+          }
+          throw new Error("Empty SSE response");
+        } catch {
+          const fallbackRes = await fetch(req.url, {
+            method: req.method,
+            headers: req.headers,
+            body: JSON.stringify(body),
+          });
+
+          if (!fallbackRes.ok) {
+            const errText = await fallbackRes.text();
+            throw new Error(`AI API ${fallbackRes.status}: ${errText.slice(0, 500)}`);
+          }
+
+          const data = await fallbackRes.json();
+          return parseOpenAIResponse(data);
+        }
       },
     });
     this.config = config;
@@ -142,12 +175,13 @@ export function buildOpenAIRequest(
     model: config.model,
     messages: openaiMessages,
     temperature: 0.3,
-    max_tokens: 8192,
+    max_tokens: 4096,
   };
 
   if (openaiTools && openaiTools.length > 0) {
     body.tools = openaiTools;
     body.tool_choice = "auto";
+    body.parallel_tool_calls = true;
   }
 
   return {
@@ -254,4 +288,154 @@ function convertMessages(
   }
 
   return result;
+}
+
+// ─── 流式响应解析 ───
+
+/** SSE 流中 tool_calls delta 的类型 */
+type OpenAIStreamToolCallDelta = {
+  index: number;
+  id?: string;
+  function?: { name?: string; arguments?: string };
+};
+
+/** SSE 流中单个 chunk 的类型 */
+type OpenAIStreamChunk = {
+  choices?: Array<{
+    delta: {
+      content?: string;
+      tool_calls?: OpenAIStreamToolCallDelta[];
+    };
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+};
+
+/**
+ * 从 OpenAI SSE 流解析为统一的 AIChatResponse。
+ *
+ * 实现原理：
+ * - SSE 每行格式：`data: {json}`，结束标志 `data: [DONE]`
+ * - 文本内容通过 `delta.content` 跨 chunk 累积
+ * - 工具调用通过 `delta.tool_calls[].index` 识别，arguments 跨 chunk 拼接
+ * - 用量信息需通过 `stream_options: { include_usage: true }` 请求才会返回
+ *
+ * 如果 response.body 不可用（极少数环境），自动回退到非流式解析。
+ */
+export async function parseOpenAIStream(
+  response: Response,
+  readTimeoutMs = 20000,
+): Promise<AIChatResponse> {
+  // 回退：无 ReadableStream 支持
+  if (!response.body) {
+    const data = await response.json();
+    return parseOpenAIResponse(data);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  let text = "";
+  const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+  let usage: AIChatResponse["usage"];
+  let buffer = "";
+  let streamDone = false;
+
+  async function readWithTimeout() {
+    return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`SSE read timeout (${readTimeoutMs}ms)`));
+      }, readTimeoutMs);
+
+      reader.read().then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  while (!streamDone) {
+    const { done, value } = await readWithTimeout();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // 按换行分割，保留不完整的最后一行
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(":")) continue;
+      if (trimmed === "data: [DONE]" || trimmed === "data:[DONE]") {
+        streamDone = true;
+        break;
+      }
+      if (!trimmed.startsWith("data:")) continue;
+
+      // 兼容 `data:{...}` 与 `data: {...}` 两种格式
+      const payload = trimmed.slice(5).trim();
+      if (!payload) continue;
+
+      try {
+        const chunk = JSON.parse(payload) as OpenAIStreamChunk;
+        const delta = chunk.choices?.[0]?.delta;
+
+        // 累积文本
+        if (delta?.content) text += delta.content;
+
+        // 累积工具调用（按 index 分组）
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            const existing = toolCallMap.get(idx);
+            if (existing) {
+              if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+            } else {
+              toolCallMap.set(idx, {
+                id: tc.id ?? "",
+                name: tc.function?.name ?? "",
+                arguments: tc.function?.arguments ?? "",
+              });
+            }
+          }
+        }
+
+        // 用量信息（流式需 stream_options.include_usage）
+        if (chunk.usage) {
+          usage = {
+            inputTokens: chunk.usage.prompt_tokens ?? 0,
+            outputTokens: chunk.usage.completion_tokens ?? 0,
+          };
+        }
+      } catch {
+        // 无效 JSON 行，跳过
+      }
+    }
+  }
+
+  if (streamDone) {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  // 组装工具调用
+  const toolCalls: AIToolCall[] = [];
+  for (const [, tc] of [...toolCallMap.entries()].sort((a, b) => a[0] - b[0])) {
+    try {
+      toolCalls.push({ id: tc.id, name: tc.name, input: JSON.parse(tc.arguments) });
+    } catch {
+      // 工具参数 JSON 解析失败，跳过
+    }
+  }
+
+  return {
+    text: text || undefined,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    usage,
+  };
 }

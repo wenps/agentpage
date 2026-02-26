@@ -11,17 +11,17 @@ import { defineConfig } from "vite";
 export default defineConfig({
   root: "demo",
 
-  // 暴露 GITHUB_TOKEN 环境变量到 import.meta.env
+  // 暴露环境变量到 import.meta.env
   envDir: "..",
-  envPrefix: ["VITE_", "GITHUB_"],
+  envPrefix: ["VITE_", "GITHUB_", "DEEPSEEK_"],
 
   server: {
     port: 3000,
     open: true,
     proxy: {
-      // /api → GitHub Models API (Azure)
+      // /api → DeepSeek API
       "/api": {
-        target: "https://models.inference.ai.azure.com",
+        target: "https://api.deepseek.com",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
         secure: true,

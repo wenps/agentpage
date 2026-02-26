@@ -122,6 +122,10 @@ export async function executeAgentLoop(
   const actionRecoveryAttempts = new Map<string, number>();
   const pageContext: PageContextState = {};
   let finalReply = "";
+  /** 连续"纯信息查询"轮次计数 — 检测 AI 空转 */
+  let consecutiveReadOnlyRounds = 0;
+  /** 纯信息查询工具（不改变页面状态） */
+  const READ_ONLY_TOOLS = new Set(["page_info"]);
 
   for (let round = 0; round < maxRounds; round++) {
     callbacks?.onRound?.(round);
@@ -174,33 +178,22 @@ export async function executeAgentLoop(
     }
 
     // ─── 执行工具调用 ───
+    // 同一轮内的多个工具调用，URL 只在轮次开头检查一次
+    const latestUrl = await readPageUrl(registry);
+    if (latestUrl) {
+      if (!pageContext.currentUrl) {
+        pageContext.currentUrl = latestUrl;
+      } else if (latestUrl !== pageContext.currentUrl) {
+        // URL 已变 — 拍新快照
+        pageContext.currentUrl = latestUrl;
+        callbacks?.onBeforeRecoverySnapshot?.(latestUrl);
+        pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
+      }
+    }
+
+    // 批量执行所有工具调用 — 不在中间插入额外检查
     for (const tc of response.toolCalls) {
       callbacks?.onToolCall?.(tc.name, tc.input);
-
-      // URL 跟踪：检测变化，主动拍快照
-      const latestUrl = await readPageUrl(registry);
-      if (latestUrl) {
-        if (!pageContext.currentUrl) {
-          pageContext.currentUrl = latestUrl;
-        } else if (latestUrl !== pageContext.currentUrl) {
-          // URL 已变 — 立即拍新快照
-          pageContext.currentUrl = latestUrl;
-          callbacks?.onBeforeRecoverySnapshot?.(latestUrl);
-          pageContext.latestSnapshot = await readPageSnapshot(registry, 8);
-
-          // DOM 操作需基于新快照重新定位
-          if (tc.name === "dom") {
-            const result: ToolCallResult = {
-              content: `URL 已变更为 ${latestUrl}，请基于最新快照重新定位目标元素。`,
-              details: { error: true, code: "URL_CHANGED_REQUIRE_NEW_SNAPSHOT", url: latestUrl },
-            };
-            allToolCalls.push({ name: tc.name, input: tc.input, result });
-            fullToolTrace.push({ round, name: tc.name, input: tc.input, result, marker: "[URL变化待重定位]" });
-            callbacks?.onToolResult?.(tc.name, result);
-            continue;
-          }
-        }
-      }
 
       // 执行工具
       let result = await registry.dispatch(tc.name, tc.input);
@@ -215,13 +208,12 @@ export async function executeAgentLoop(
         if (attempts <= DEFAULT_ACTION_RECOVERY_ROUNDS) {
           await sleep(recoveryWaitMs);
           callbacks?.onBeforeRecoverySnapshot?.();
-          pageContext.latestSnapshot = await readPageSnapshot(registry, 8);
+          pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
 
           result = {
             content: [
               toContentString(result.content),
-              "",
-              `自动恢复 ${attempts}/${DEFAULT_ACTION_RECOVERY_ROUNDS}：已刷新快照，请重新定位目标元素。`,
+              `Recovery ${attempts}/${DEFAULT_ACTION_RECOVERY_ROUNDS}: snapshot refreshed, re-locate target.`,
             ].join("\n"),
             details: {
               error: true,
@@ -234,8 +226,7 @@ export async function executeAgentLoop(
           result = {
             content: [
               toContentString(result.content),
-              "",
-              `已达到最大自动恢复次数（${DEFAULT_ACTION_RECOVERY_ROUNDS}）。请调整操作目标后重试。`,
+              `Max recovery attempts (${DEFAULT_ACTION_RECOVERY_ROUNDS}) reached. Try a different target.`,
             ].join("\n"),
             details: {
               error: true,
@@ -273,6 +264,21 @@ export async function executeAgentLoop(
 
       callbacks?.onToolResult?.(tc.name, result);
     }
+
+    // ─── 空转检测：AI 连续只调只读工具 → 强制终止 ───
+    const allReadOnly = response.toolCalls!.every(tc => READ_ONLY_TOOLS.has(tc.name));
+    if (allReadOnly) {
+      consecutiveReadOnlyRounds++;
+      if (consecutiveReadOnlyRounds >= 2) {
+        // AI 连续 2 轮只做查询不做操作 → 任务可能已完成
+        finalReply = response.text || "任务已完成。";
+        if (finalReply) callbacks?.onText?.(finalReply);
+        break;
+      }
+    } else {
+      consecutiveReadOnlyRounds = 0;
+    }
+
     // 下一轮从 trace 重建紧凑消息，无需累积
   }
 

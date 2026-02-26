@@ -20,6 +20,9 @@ export {
   type ChatHandlerParams,
   OpenAIClient,
   AnthropicClient,
+  DeepSeekClient,
+  parseOpenAIStream,
+  parseAnthropicStream,
 } from "./ai-client/index.js";
 
 // 工具注册表
