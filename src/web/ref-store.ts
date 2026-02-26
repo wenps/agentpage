@@ -89,6 +89,21 @@ export class RefStore {
     this.map.clear();
   }
 
+  /**
+   * 重置映射表：清空所有映射，并可选更新 URL 命名空间。
+   *
+   * 用于页面导航后刷新 RefStore：旧的 hash ID → Element 映射已失效，
+   * 需要用新 URL 重新生成确定性 hash。
+   *
+   * @param url 新的页面 URL（不传则保持原 URL 命名空间）
+   */
+  reset(url?: string): void {
+    this.map.clear();
+    if (url !== undefined) {
+      this.urlKey = url;
+    }
+  }
+
   /** 当前映射数量 */
   get size(): number {
     return this.map.size;

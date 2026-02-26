@@ -22,8 +22,8 @@ import {
   DEFAULT_MAX_ROUNDS,
 } from "./constants.js";
 import {
+  buildCompactMessages,
   buildToolCallKey,
-  buildToolTrace,
   getToolAction,
   hasToolError,
   isElementNotFoundResult,
@@ -31,6 +31,7 @@ import {
   readPageUrl,
   resolveRecoveryWaitMs,
   sleep,
+  stripSnapshotFromPrompt,
   toContentString,
   type ToolTraceEntry,
 } from "./helpers.js";
@@ -47,6 +48,15 @@ export type AgentLoopCallbacks = {
   onToolResult?: (name: string, result: ToolCallResult) => void;
   /** 每轮循环开始时触发（round 从 0 开始） */
   onRound?: (round: number) => void;
+  /**
+   * 恢复快照生成前触发（页面 URL 变化或元素定位失败时）。
+   *
+   * 用于 WebAgent 重置 RefStore（清空旧的 hash ID → Element 映射，
+   * 用新 URL 重新生成确定性 hash），确保恢复快照中的 ID 有效。
+   *
+   * @param newUrl 当前页面 URL（URL 变化时传入；元素定位失败时为 undefined）
+   */
+  onBeforeRecoverySnapshot?: (newUrl?: string) => void;
 };
 
 // ─── 参数与结果 ───
@@ -82,7 +92,6 @@ export type AgentLoopResult = {
 type PageContextState = {
   currentUrl?: string;
   latestSnapshot?: string;
-  needsSnapshotBeforeDom: boolean;
 };
 
 /**
@@ -108,24 +117,33 @@ export async function executeAgentLoop(
   } = params;
 
   const tools = registry.getDefinitions();
-  // 将历史消息（如有）放在当前用户消息之前，实现多轮记忆
-  const messages: AIMessage[] = [
-    ...(history ?? []),
-    { role: "user", content: message },
-  ];
   const allToolCalls: AgentLoopResult["toolCalls"] = [];
   const fullToolTrace: ToolTraceEntry[] = [];
   const actionRecoveryAttempts = new Map<string, number>();
-  const pageContext: PageContextState = {
-    needsSnapshotBeforeDom: false,
-  };
+  const pageContext: PageContextState = {};
   let finalReply = "";
 
   for (let round = 0; round < maxRounds; round++) {
     callbacks?.onRound?.(round);
 
-    // 调用 AI（发送系统提示 + 对话历史 + 可用工具列表）
-    const response = await client.chat({ systemPrompt, messages, tools });
+    // ─── 构建紧凑消息：每轮从 trace 重建，而非累积 message 对 ───
+    const effectivePrompt = pageContext.latestSnapshot
+      ? stripSnapshotFromPrompt(systemPrompt)
+      : systemPrompt;
+
+    const chatMessages = buildCompactMessages(
+      message,
+      fullToolTrace,
+      pageContext.latestSnapshot,
+      pageContext.currentUrl,
+      history,
+    );
+
+    const response = await client.chat({
+      systemPrompt: effectivePrompt,
+      messages: chatMessages,
+      tools,
+    });
 
     // 没有工具调用 → 循环结束，拿到最终回复
     if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -156,67 +174,38 @@ export async function executeAgentLoop(
     }
 
     // ─── 执行工具调用 ───
-    const toolResults: Array<{ toolCallId: string; result: string }> = [];
-
     for (const tc of response.toolCalls) {
       callbacks?.onToolCall?.(tc.name, tc.input);
 
+      // URL 跟踪：检测变化，主动拍快照
       const latestUrl = await readPageUrl(registry);
       if (latestUrl) {
         if (!pageContext.currentUrl) {
           pageContext.currentUrl = latestUrl;
         } else if (latestUrl !== pageContext.currentUrl) {
+          // URL 已变 — 立即拍新快照
           pageContext.currentUrl = latestUrl;
-          pageContext.needsSnapshotBeforeDom = true;
+          callbacks?.onBeforeRecoverySnapshot?.(latestUrl);
+          pageContext.latestSnapshot = await readPageSnapshot(registry, 8);
+
+          // DOM 操作需基于新快照重新定位
+          if (tc.name === "dom") {
+            const result: ToolCallResult = {
+              content: `URL 已变更为 ${latestUrl}，请基于最新快照重新定位目标元素。`,
+              details: { error: true, code: "URL_CHANGED_REQUIRE_NEW_SNAPSHOT", url: latestUrl },
+            };
+            allToolCalls.push({ name: tc.name, input: tc.input, result });
+            fullToolTrace.push({ round, name: tc.name, input: tc.input, result, marker: "[URL变化待重定位]" });
+            callbacks?.onToolResult?.(tc.name, result);
+            continue;
+          }
         }
       }
 
-      if (tc.name === "dom" && pageContext.needsSnapshotBeforeDom) {
-        const snapshotText = await readPageSnapshot(registry, 8);
-        pageContext.latestSnapshot = snapshotText;
-        pageContext.needsSnapshotBeforeDom = false;
-
-        const result: ToolCallResult = {
-          content: [
-            `检测到页面 URL 变化：${pageContext.currentUrl ?? "(未知)"}`,
-            "已在执行 DOM 操作前生成最新快照，请基于该快照重新定位目标元素后重试当前工具调用。",
-            "",
-            "本次对话任务完整工具轨迹：",
-            buildToolTrace(fullToolTrace, {
-              round,
-              name: tc.name,
-              input: tc.input,
-              marker: "[URL变化待重定位]",
-            }),
-            "",
-            "最新页面快照：",
-            snapshotText,
-          ].join("\n"),
-          details: {
-            error: true,
-            code: "URL_CHANGED_REQUIRE_NEW_SNAPSHOT",
-            url: pageContext.currentUrl,
-          },
-        };
-
-        allToolCalls.push({ name: tc.name, input: tc.input, result });
-        fullToolTrace.push({
-          round,
-          name: tc.name,
-          input: tc.input,
-          result,
-          marker: "[URL变化待重定位]",
-        });
-        callbacks?.onToolResult?.(tc.name, result);
-        toolResults.push({
-          toolCallId: tc.id,
-          result: toContentString(result.content),
-        });
-        continue;
-      }
-
+      // 执行工具
       let result = await registry.dispatch(tc.name, tc.input);
 
+      // 元素未找到 → 自动恢复（刷新快照）
       if (tc.name === "dom" && isElementNotFoundResult(result)) {
         const key = buildToolCallKey(tc.name, tc.input);
         const attempts = (actionRecoveryAttempts.get(key) ?? 0) + 1;
@@ -225,61 +214,34 @@ export async function executeAgentLoop(
 
         if (attempts <= DEFAULT_ACTION_RECOVERY_ROUNDS) {
           await sleep(recoveryWaitMs);
-
-          const snapshotText = await readPageSnapshot(registry, 8);
-          pageContext.latestSnapshot = snapshotText;
-          const originalError = toContentString(result.content);
-          const fullTrace = buildToolTrace(fullToolTrace, {
-            round,
-            name: tc.name,
-            input: tc.input,
-            result,
-            marker: "[当前失败]",
-          });
+          callbacks?.onBeforeRecoverySnapshot?.();
+          pageContext.latestSnapshot = await readPageSnapshot(registry, 8);
 
           result = {
             content: [
-              originalError,
+              toContentString(result.content),
               "",
-              `自动恢复 ${attempts}/${DEFAULT_ACTION_RECOVERY_ROUNDS}：等待 ${recoveryWaitMs}ms 后重新获取页面快照。`,
-              "本次对话任务完整工具轨迹（含本次失败）：",
-              fullTrace,
-              "请根据下方最新快照，重新定位本次操作目标元素并再次调用工具。",
-              "",
-              "最新页面快照：",
-              snapshotText,
+              `自动恢复 ${attempts}/${DEFAULT_ACTION_RECOVERY_ROUNDS}：已刷新快照，请重新定位目标元素。`,
             ].join("\n"),
             details: {
               error: true,
               code: "ELEMENT_NOT_FOUND_RECOVERY",
               recoveryAttempt: attempts,
               recoveryMaxRounds: DEFAULT_ACTION_RECOVERY_ROUNDS,
-              waitMs: recoveryWaitMs,
             },
           };
         } else {
-          const originalError = toContentString(result.content);
-          const fullTrace = buildToolTrace(fullToolTrace, {
-            round,
-            name: tc.name,
-            input: tc.input,
-            result,
-            marker: "[超过恢复上限]",
-          });
           result = {
             content: [
-              originalError,
+              toContentString(result.content),
               "",
-              `已达到最大自动恢复次数（${DEFAULT_ACTION_RECOVERY_ROUNDS}）。请根据当前页面状态调整操作目标后重试。`,
-              "本次对话任务完整工具轨迹：",
-              fullTrace,
+              `已达到最大自动恢复次数（${DEFAULT_ACTION_RECOVERY_ROUNDS}）。请调整操作目标后重试。`,
             ].join("\n"),
             details: {
               error: true,
               code: "ELEMENT_NOT_FOUND_MAX_RECOVERY_REACHED",
               recoveryAttempt: attempts,
               recoveryMaxRounds: DEFAULT_ACTION_RECOVERY_ROUNDS,
-              waitMs: recoveryWaitMs,
             },
           };
         }
@@ -288,48 +250,40 @@ export async function executeAgentLoop(
       allToolCalls.push({ name: tc.name, input: tc.input, result });
       fullToolTrace.push({ round, name: tc.name, input: tc.input, result });
 
+      // 捕获显式 page_info(snapshot) 结果
+      if (tc.name === "page_info" && getToolAction(tc.input) === "snapshot") {
+        pageContext.latestSnapshot = toContentString(result.content);
+      }
+
+      // 导航后主动检测 URL 变化并拍快照
       if (tc.name === "navigate") {
         const action = getToolAction(tc.input);
         if (
-          action === "goto" ||
-          action === "back" ||
-          action === "forward" ||
-          action === "reload"
+          (action === "goto" || action === "back" || action === "forward" || action === "reload") &&
+          !hasToolError(result)
         ) {
-          if (!hasToolError(result)) {
-            pageContext.needsSnapshotBeforeDom = true;
+          const newUrl = await readPageUrl(registry);
+          if (newUrl && newUrl !== pageContext.currentUrl) {
+            pageContext.currentUrl = newUrl;
+            callbacks?.onBeforeRecoverySnapshot?.(newUrl);
+            pageContext.latestSnapshot = await readPageSnapshot(registry, 8);
           }
         }
       }
 
       callbacks?.onToolResult?.(tc.name, result);
-
-      toolResults.push({
-        toolCallId: tc.id,
-        result:
-          typeof result.content === "string"
-            ? result.content
-            : JSON.stringify(result.content),
-      });
     }
-
-    // 将 AI 回复（含 tool_call）和工具结果追加到对话历史
-    messages.push({
-      role: "assistant",
-      content: response.text ?? "",
-      toolCalls: response.toolCalls,
-    });
-    messages.push({
-      role: "tool",
-      content: toolResults,
-    });
-    // → 回到循环顶部，AI 根据工具结果继续思考
+    // 下一轮从 trace 重建紧凑消息，无需累积
   }
 
-  // 如果有最终回复但尚未作为 assistant 消息加入历史，补充进去
+  // 构建紧凑的 result.messages 供多轮记忆使用
+  const resultMessages: AIMessage[] = [...(history ?? []), { role: "user", content: message }];
   if (finalReply) {
-    messages.push({ role: "assistant", content: finalReply });
+    resultMessages.push({ role: "assistant", content: finalReply });
   }
 
-  return { reply: finalReply, toolCalls: allToolCalls, messages };
+  return { reply: finalReply, toolCalls: allToolCalls, messages: resultMessages };
 }
+
+// ─── Re-exports ───
+export { wrapSnapshot } from "./helpers.js";

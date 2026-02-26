@@ -6,8 +6,12 @@
  */
 import type { ToolCallResult } from "../tool-registry.js";
 import { ToolRegistry } from "../tool-registry.js";
+import type { AIMessage } from "../types.js";
 import {
   DEFAULT_RECOVERY_WAIT_MS,
+  SNAPSHOT_END,
+  SNAPSHOT_OUTDATED,
+  SNAPSHOT_START,
 } from "./constants.js";
 
 /** 单次工具执行轨迹条目（用于恢复提示和调试展示）。 */
@@ -161,4 +165,167 @@ export async function readPageSnapshot(
     maxDepth,
   });
   return toContentString(result.content);
+}
+
+// ─── DOM 快照去重 ───
+
+/** 转义正则特殊字符 */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 匹配快照标记对及其内容的正则 */
+const SNAPSHOT_REGEX = new RegExp(
+  `${escapeRegex(SNAPSHOT_START)}[\\s\\S]*?${escapeRegex(SNAPSHOT_END)}`,
+  "g",
+);
+
+/** 用标记包裹快照内容，便于后续去重识别。 */
+export function wrapSnapshot(snapshot: string): string {
+  return `${SNAPSHOT_START}\n${snapshot}\n${SNAPSHOT_END}`;
+}
+
+/** 检测文本中是否包含快照标记。 */
+function containsSnapshot(text: string): boolean {
+  return text.includes(SNAPSHOT_START);
+}
+
+/**
+ * 去重消息中的 DOM 快照：只保留最后一份，旧的替换为占位摘要。
+ * 避免多轮对话中快照滚雪球式累积，大幅减少 token 消耗。
+ *
+ * @returns 消息中是否存在快照（用于决定是否需要剥离 system prompt 中的快照）
+ */
+export function deduplicateSnapshots(messages: AIMessage[]): boolean {
+  type SnapshotRef = {
+    items: Array<{ toolCallId: string; result: string }>;
+    index: number;
+  };
+  const refs: SnapshotRef[] = [];
+
+  for (const msg of messages) {
+    if (msg.role !== "tool" || !Array.isArray(msg.content)) continue;
+    const items = msg.content as Array<{ toolCallId: string; result: string }>;
+    for (let j = 0; j < items.length; j++) {
+      if (typeof items[j].result === "string" && containsSnapshot(items[j].result)) {
+        refs.push({ items, index: j });
+      }
+    }
+  }
+
+  if (refs.length <= 1) return refs.length > 0;
+
+  // 保留最后一份快照，将更早的快照替换为过期提示
+  for (let i = 0; i < refs.length - 1; i++) {
+    const ref = refs[i];
+    ref.items[ref.index].result = ref.items[ref.index].result.replace(
+      SNAPSHOT_REGEX,
+      SNAPSHOT_OUTDATED,
+    );
+  }
+
+  return true;
+}
+
+/**
+ * 从 system prompt 中剥离已过期的快照内容。
+ * 当消息历史中已有更新的快照时调用，避免 AI 参考过时信息。
+ */
+export function stripSnapshotFromPrompt(prompt: string): string {
+  if (!containsSnapshot(prompt)) return prompt;
+  return prompt.replace(SNAPSHOT_REGEX, SNAPSHOT_OUTDATED);
+}
+
+// ─── 消息压缩 ───
+
+/**
+ * 格式化工具结果为简短一行摘要。
+ * 成功操作保留首行描述；失败操作标注错误代码。
+ */
+function formatToolResultBrief(result: ToolCallResult): string {
+  const content = toContentString(result.content);
+  const firstLine = content.split("\n").find(l => l.trim())?.trim().slice(0, 80) ?? "";
+
+  if (hasToolError(result)) {
+    const code = result.details && typeof result.details === "object"
+      ? (result.details as { code?: string }).code
+      : undefined;
+    return `✗ ${firstLine}${code ? ` [${code}]` : ""}`;
+  }
+  return `✓ ${firstLine}`;
+}
+
+/**
+ * 构建发送给 AI 的紧凑消息数组。
+ *
+ * 核心思路：保留用户原始消息与 system prompt 不变，
+ * 只将循环中产出的 assistant（含 toolCalls）+ tool（结果）消息对
+ * 压缩为一条 assistant 摘要 + 一条 user 上下文。
+ *
+ * 消息结构：
+ * - 首轮：[...history, { user: 原始消息 }]
+ * - 后续：[...history, { user: 原始消息 }, { assistant: 工具执行摘要 }, { user: 当前状态+快照 }]
+ *
+ * 固定最多 history.length + 3 条消息，不随轮次增长。
+ */
+export function buildCompactMessages(
+  userMessage: string,
+  trace: ToolTraceEntry[],
+  latestSnapshot: string | undefined,
+  currentUrl: string | undefined,
+  history?: AIMessage[],
+): AIMessage[] {
+  const messages: AIMessage[] = history ? [...history] : [];
+
+  // 用户原始消息始终独立保留
+  messages.push({ role: "user", content: userMessage });
+
+  // 首轮无工具执行，直接返回
+  if (trace.length === 0) return messages;
+
+  // ─── 压缩 assistant+tool 消息对为一条 assistant 摘要 ───
+  const traceParts: string[] = [];
+  for (let i = 0; i < trace.length; i++) {
+    const entry = trace[i];
+    const isError = hasToolError(entry.result);
+    const brief = formatToolResultBrief(entry.result);
+    const status = isError ? "❌" : "✅";
+    const marker = entry.marker ? ` ${entry.marker}` : "";
+    traceParts.push(
+      `${status} 步骤${i + 1}: ${entry.name}${formatToolInputBrief(entry.input)} → ${brief}${marker}`,
+    );
+  }
+  messages.push({
+    role: "assistant",
+    content: `## 已完成的操作步骤（以下步骤已执行，请勿重复）\n\n${traceParts.join("\n")}`,
+  });
+
+  // ─── 当前页面状态 + 决策指令，作为 user 消息 ───
+  const contextParts: string[] = [
+    "以上步骤已经执行完毕。请结合用户的原始请求、已完成的步骤和下方的当前页面快照，判断下一步该做什么。",
+    "**注意：不要重复已成功（✅）的操作，只执行尚未完成的下一步。**",
+  ];
+
+  // 最近失败操作详情（帮助 AI 理解原因并调整策略）
+  const lastEntry = trace[trace.length - 1];
+  if (hasToolError(lastEntry.result)) {
+    const detail = toContentString(lastEntry.result.content);
+    const stripped = detail.replace(SNAPSHOT_REGEX, "").trim();
+    if (stripped && stripped.length < 500) {
+      contextParts.push("", "### 最近失败操作详情", stripped);
+      contextParts.push("请换一种方式完成该步骤，或跳过该步骤继续后续操作。");
+    }
+  }
+
+  if (currentUrl) {
+    contextParts.push("", `当前页面：${currentUrl}`);
+  }
+
+  if (latestSnapshot) {
+    contextParts.push("", "## 当前页面 DOM 快照（这是页面的真实当前状态）", wrapSnapshot(latestSnapshot));
+  }
+
+  messages.push({ role: "user", content: contextParts.join("\n") });
+
+  return messages;
 }

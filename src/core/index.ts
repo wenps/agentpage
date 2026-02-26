@@ -38,6 +38,7 @@ export {
   type AgentLoopParams,
   type AgentLoopResult,
   type AgentLoopCallbacks,
+  wrapSnapshot,
 } from "./agent-loop/index.js";
 
 // 系统提示词

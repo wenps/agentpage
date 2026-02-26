@@ -31,6 +31,7 @@ import {
   executeAgentLoop,
   type AgentLoopCallbacks,
   type AgentLoopResult,
+  wrapSnapshot,
 } from "../core/agent-loop/index.js";
 import type { AIMessage } from "../core/types.js";
 import { createAIClient } from "../core/ai-client/index.js";
@@ -260,11 +261,29 @@ export class WebAgent {
         });
         this.callbacks.onSnapshot?.(snapshot);
 
-        systemPrompt += `\n\n## 当前页面 DOM 快照\n\n\`\`\`\n${snapshot}\n\`\`\``;
+        systemPrompt += wrapSnapshot(
+          `\n\n## 当前页面 DOM 快照\n\n\`\`\`\n${snapshot}\n\`\`\``,
+        );
       } catch {
         // 快照失败不阻塞正常流程
       }
     }
+
+    // 包装回调：在恢复快照前重置 RefStore，确保新快照的 hash ID 有效
+    const wrappedCallbacks: WebAgentCallbacks = {
+      ...this.callbacks,
+      onBeforeRecoverySnapshot: (newUrl?: string) => {
+        // URL 变化 → 清空映射 + 更新 URL 命名空间
+        // 元素定位失败 → 仅清空可能失效的映射（URL 不变）
+        if (newUrl !== undefined) {
+          refStore.reset(newUrl);
+        } else {
+          refStore.clear();
+        }
+        // 转发到用户回调（如有设置）
+        this.callbacks.onBeforeRecoverySnapshot?.(newUrl);
+      },
+    };
 
     // 复用 core/agent-loop — 同一份决策循环
     const result = await executeAgentLoop({
@@ -275,7 +294,7 @@ export class WebAgent {
       history: this.memory ? this.history : undefined,
       dryRun: this.dryRun,
       maxRounds: this.maxRounds,
-      callbacks: this.callbacks,
+      callbacks: wrappedCallbacks,
     });
 
     // 记忆模式：累积对话历史供下次 chat() 使用

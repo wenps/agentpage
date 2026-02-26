@@ -4,10 +4,13 @@
  * 替代 Playwright 的 click/fill/type 等操作，直接在页面上下文中执行。
  * 运行环境：浏览器 Content Script。
  *
- * 支持 8 种动作：
+ * 支持 11 种动作：
  *   click        — 点击元素
  *   fill         — 填写输入框（清空后设值）
  *   type         — 逐字符模拟键入
+ *   focus        — 聚焦元素
+ *   hover        — 鼠标悬停（触发 mouseenter/mouseover）
+ *   press        — 按下键盘按键（Enter/Escape/Tab/ArrowDown 等）
  *   get_text     — 获取元素文本内容
  *   get_attr     — 获取元素属性值
  *   set_attr     — 设置元素属性
@@ -142,18 +145,21 @@ export function createDomTool(): ToolDefinition {
     name: "dom",
     description: [
       "Perform DOM operations on the current page.",
-      "Actions: click, fill, type, get_text, get_attr, set_attr, add_class, remove_class.",
+      "Actions: click, fill, type, focus, hover, press, get_text, get_attr, set_attr, add_class, remove_class.",
       "Use the hash ID from DOM snapshot (e.g. #a1b2c) as selector.",
     ].join(" "),
 
     schema: Type.Object({
       action: Type.String({
         description:
-          "DOM action: click | fill | type | get_text | get_attr | set_attr | add_class | remove_class",
+          "DOM action: click | fill | type | focus | hover | press | get_text | get_attr | set_attr | add_class | remove_class",
       }),
       selector: Type.String({ description: "Element ref ID from snapshot (e.g. #r0, #r5) or CSS selector" }),
       value: Type.Optional(
         Type.String({ description: "Value for fill/type/set_attr actions" }),
+      ),
+      key: Type.Optional(
+        Type.String({ description: "Key name for press action (e.g. Enter, Escape, Tab, ArrowDown, ArrowUp, Backspace, Delete, Space)" }),
       ),
       attribute: Type.Optional(
         Type.String({ description: "Attribute name for get_attr/set_attr actions" }),
@@ -234,6 +240,43 @@ export function createDomTool(): ToolDefinition {
               el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
             }
             return { content: `已点击 ${describeElement(el)}` };
+          }
+
+          case "focus": {
+            // 聚焦元素
+            if (el instanceof HTMLElement) {
+              el.focus();
+            } else {
+              el.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
+            }
+            return { content: `已聚焦 ${describeElement(el)}` };
+          }
+
+          case "hover": {
+            // 鼠标悬停：触发 mouseenter → mouseover 事件链
+            el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false, cancelable: true }));
+            el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true }));
+            return { content: `已悬停 ${describeElement(el)}` };
+          }
+
+          case "press": {
+            // 按下指定键：先聚焦元素，再触发 keydown → keypress → keyup 完整事件链
+            const key = (params.key as string) || (params.value as string);
+            if (!key) return { content: "缺少 key 参数（如 Enter, Escape, Tab）" };
+
+            if (el instanceof HTMLElement) el.focus();
+
+            const eventInit: KeyboardEventInit = {
+              key,
+              code: key,
+              bubbles: true,
+              cancelable: true,
+            };
+            el.dispatchEvent(new KeyboardEvent("keydown", eventInit));
+            el.dispatchEvent(new KeyboardEvent("keypress", eventInit));
+            el.dispatchEvent(new KeyboardEvent("keyup", eventInit));
+            return { content: `已在 ${describeElement(el)} 上按下 ${key}` };
           }
 
           case "fill": {
