@@ -1,32 +1,8 @@
 /**
- * AI Client — 基于 fetch 的 AI 客户端（主入口）。
+ * AI 客户端主入口（中）/ AI client entrypoint based on fetch (EN).
  *
- * 使用原生 fetch API，浏览器天然支持，不依赖任何 SDK，零环境耦合。
- *
- * 支持四种 provider：
- * - "openai"    → OpenAI API (https://api.openai.com/v1)
- * - "copilot"   → GitHub Models API (https://models.inference.ai.azure.com)
- * - "anthropic" → Anthropic API (https://api.anthropic.com)
- * - "deepseek"  → DeepSeek API (https://api.deepseek.com)
- *
- * 提供两层 API：
- * - 高层：createAIClient(config) → AIClient（工厂函数，自动选择客户端类）
- * - 类：OpenAIClient / AnthropicClient / BaseAIClient（直接实例化）
- *
- * 类继承体系：
- *   BaseAIClient（custom.ts）— 可继承的基类，用户自定义 AI 对接
- *     ├── OpenAIClient（openai.ts）— OpenAI / Copilot 实现
- *     └── AnthropicClient（anthropic.ts）— Anthropic 实现
- *
- * 文件组织：
- *   ai-client/index.ts          ← 主入口（本文件）：类型定义 + dispatcher + re-export
- *   ai-client/custom.ts         ← BaseAIClient 基类（用户自定义 AI 对接）
- *   ai-client/openai.ts         ← OpenAIClient + OpenAI 格式转换
- *   ai-client/anthropic.ts      ← AnthropicClient + Anthropic 格式转换
- *   ai-client/constants.ts      ← 端点映射 + 共享工具函数
- *
- * 使用方：
- *   core/ai-client.ts ←── web/index.ts（WebAgent）
+ * 提供 provider 路由与统一类型导出。
+ * Provides provider routing and unified type exports.
  */
 import type { AIClient, AIChatResponse, AIMessage } from "../types.js";
 import type { ToolDefinition } from "../tool-registry.js";
@@ -46,7 +22,7 @@ export { DeepSeekClient } from "./deepseek.js";
 
 // ─── 公共类型定义 ───
 
-/** AI 客户端配置 */
+/** AI 客户端配置（中）/ AI client configuration (EN). */
 export type AIClientConfig = {
   /** AI 提供商: "openai" | "copilot" | "anthropic" */
   provider: string;
@@ -60,7 +36,7 @@ export type AIClientConfig = {
   stream?: boolean;
 };
 
-/** chat 方法的统一入参 */
+/** 统一 chat 入参（中）/ Unified chat parameters (EN). */
 export type ChatParams = {
   /** 系统提示词 */
   systemPrompt: string;
@@ -71,10 +47,7 @@ export type ChatParams = {
 };
 
 /**
- * 构建好的 HTTP 请求对象 — 可直接传给 fetch。
- *
- * 被 OpenAIClient / AnthropicClient 内部使用，
- * 也可通过 buildOpenAIRequest() / buildAnthropicRequest() 底层函数获取。
+ * HTTP 请求对象（中）/ Built HTTP request init payload (EN).
  */
 export type ChatRequestInit = {
   /** 请求 URL */
@@ -90,16 +63,7 @@ export type ChatRequestInit = {
 // ─── 高层 API ───
 
 /**
- * 创建 AI 客户端（高层 API）。
- *
- * 根据 provider 自动创建对应的客户端类实例：
- * - openai / copilot → new OpenAIClient(config)
- * - anthropic        → new AnthropicClient(config)
- *
- * 返回 AIClient 接口，调用 chat() 即可与 AI 对话。
- *
- * @param config - 包含 provider、model、apiKey 等配置
- * @returns AIClient 实例（OpenAIClient 或 AnthropicClient）
+ * 创建 AI 客户端（中）/ Create AI client by provider (EN).
  */
 export function createAIClient(config: AIClientConfig): AIClient {
   validateProvider(config.provider);

@@ -1,38 +1,22 @@
 /**
- * Anthropic Messages API 客户端。
- *
- * Anthropic 使用与 OpenAI 完全不同的 API 格式：
- * - system prompt 通过 body.system 字段传入（不在消息数组中）
- * - 工具调用使用 content block 机制（tool_use / tool_result）
- * - 工具结果作为 user 角色消息发送（而非 tool 角色）
- * - API 版本通过 `anthropic-version` 请求头指定
- *
- * 提供两层能力：
- * - 类：AnthropicClient（继承 BaseAIClient）— 封装完整 fetch 流程
- * - 函数：buildAnthropicRequest / parseAnthropicResponse — 底层格式转换
- *
- * 继承关系：
- *   BaseAIClient（custom.ts）
- *     └── AnthropicClient（本文件）— 覆盖 chat()，内部调用 build → fetch → parse
- *
- * 使用方：
- *   ai-client/anthropic.ts ←── ai-client/index.ts（主入口）
+ * Anthropic 客户端实现（中）/ Anthropic Messages API client implementation (EN).
  */
 import type { AIChatResponse, AIMessage, AIToolCall } from "../types.js";
 import type { AIClientConfig, ChatParams, ChatRequestInit } from "./index.js";
 import { BaseAIClient } from "./custom.js";
 import type { ChatHandlerParams } from "./custom.js";
+import { consumeSSEJSON } from "./sse.js";
 import { resolveBaseURL, cleanSchema } from "./constants.js";
 
 // ─── Anthropic 原始 API 响应类型 ───
 
-/** Anthropic 文本内容块 */
+/** Anthropic 文本块（中）/ Anthropic text block (EN). */
 type AnthropicTextBlock = {
   type: "text";
   text: string;
 };
 
-/** Anthropic 工具调用内容块 */
+/** Anthropic 工具调用块（中）/ Anthropic tool_use block (EN). */
 type AnthropicToolUseBlock = {
   type: "tool_use";
   id: string;
@@ -40,10 +24,10 @@ type AnthropicToolUseBlock = {
   input: unknown;
 };
 
-/** Anthropic content 数组中的元素（文本 或 工具调用） */
+/** Anthropic 内容块联合类型（中）/ Anthropic content block union (EN). */
 type AnthropicContentBlock = AnthropicTextBlock | AnthropicToolUseBlock;
 
-/** Anthropic Messages API 的原始 JSON 响应 */
+/** Anthropic 原始响应类型（中）/ Raw Anthropic response type (EN). */
 type AnthropicRawResponse = {
   content?: AnthropicContentBlock[];
   usage?: {
@@ -55,22 +39,7 @@ type AnthropicRawResponse = {
 // ─── AnthropicClient 类 ───
 
 /**
- * Anthropic AI 客户端 — 继承 BaseAIClient。
- *
- * 封装完整的 Anthropic Messages API 调用流程：
- * 1. buildAnthropicRequest() → 构建 HTTP 请求
- * 2. fetch() → 发送请求
- * 3. parseAnthropicResponse() → 解析响应为统一格式
- *
- * 使用示例：
- * ```ts
- * const client = new AnthropicClient({
- *   provider: "anthropic",
- *   model: "claude-sonnet-4-20250514",
- *   apiKey: "sk-ant-xxx",
- * });
- * const response = await client.chat({ systemPrompt, messages, tools });
- * ```
+ * AnthropicClient 类（中）/ AnthropicClient class (EN).
  */
 export class AnthropicClient extends BaseAIClient {
   /** AI 客户端配置（provider / model / apiKey / baseURL） */
@@ -127,16 +96,7 @@ export class AnthropicClient extends BaseAIClient {
 // ─── 底层 API：请求构建 ───
 
 /**
- * 将统一格式的 ChatParams 转换为 Anthropic Messages API 请求。
- *
- * 关键格式差异（与 OpenAI 相比）：
- * - system prompt → body.system 字段（非消息数组元素）
- * - 工具定义 → input_schema（而非 parameters）
- * - 工具结果 → user 角色 + tool_result content block
- * - AI 工具调用 → assistant 角色 + tool_use content block
- *
- * max_tokens 策略：opus 模型 16384，其他模型 8192。
- * 认证头使用 `x-api-key`（而非 Authorization Bearer）。
+ * 构建 Anthropic 请求（中）/ Build Anthropic Messages API request (EN).
  */
 export function buildAnthropicRequest(
   config: AIClientConfig,
@@ -186,13 +146,7 @@ export function buildAnthropicRequest(
 // ─── 响应解析 ───
 
 /**
- * 将 Anthropic Messages API 原始响应解析为统一的 AIChatResponse。
- *
- * Anthropic 使用 content block 数组返回多种内容：
- * - type="text"     → 文本回复（可能多个，合并为一个字符串）
- * - type="tool_use" → 工具调用（id + name + input）
- *
- * Token 用量字段名也不同：input_tokens / output_tokens（非 prompt_tokens）。
+ * 解析 Anthropic 响应（中）/ Parse raw Anthropic response (EN).
  */
 export function parseAnthropicResponse(data: unknown): AIChatResponse {
   const d = data as AnthropicRawResponse;
@@ -227,12 +181,7 @@ export function parseAnthropicResponse(data: unknown): AIChatResponse {
 // ─── 内部辅助函数 ───
 
 /**
- * 将统一消息格式转换为 Anthropic 消息数组。
- *
- * 关键差异处理：
- * 1. 过滤 system 消息（Anthropic 通过 body.system 传入）
- * 2. tool 角色消息 → user 角色 + tool_result content block
- * 3. assistant 含 toolCalls → text + tool_use content blocks
+ * 消息格式转换（中）/ Convert unified messages to Anthropic format (EN).
  */
 function convertMessages(
   messages: AIMessage[],
@@ -281,17 +230,7 @@ function convertMessages(
 // ─── 流式响应解析 ───
 
 /**
- * 从 Anthropic SSE 流解析为统一的 AIChatResponse。
- *
- * Anthropic 流式事件类型：
- * - message_start       → 消息骨架 + input_tokens
- * - content_block_start  → 新内容块（text 或 tool_use）
- * - content_block_delta  → 增量内容（text_delta 或 input_json_delta）
- * - content_block_stop   → 内容块结束
- * - message_delta        → output_tokens + stop_reason
- * - message_stop         → 消息结束
- *
- * 如果 response.body 不可用，自动回退到非流式解析。
+ * 解析 Anthropic SSE（中）/ Parse Anthropic SSE stream (EN).
  */
 export async function parseAnthropicStream(response: Response): Promise<AIChatResponse> {
   // 回退：无 ReadableStream 支持
@@ -300,85 +239,63 @@ export async function parseAnthropicStream(response: Response): Promise<AIChatRe
     return parseAnthropicResponse(data);
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-
   let text = "";
   const toolCalls: AIToolCall[] = [];
   let currentToolUse: { id: string; name: string; inputJson: string } | null = null;
   let inputTokens = 0;
   let outputTokens = 0;
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      // 跳过空行、注释行、event 行（只处理 data 行）
-      if (!trimmed || trimmed.startsWith(":") || trimmed.startsWith("event:")) continue;
-      if (!trimmed.startsWith("data: ")) continue;
-
-      try {
-        const event = JSON.parse(trimmed.slice(6)) as Record<string, unknown>;
-
-        switch (event.type) {
-          case "message_start": {
-            const msg = event.message as { usage?: { input_tokens?: number } } | undefined;
-            inputTokens = msg?.usage?.input_tokens ?? 0;
-            break;
-          }
-
-          case "content_block_start": {
-            const block = event.content_block as { type: string; id?: string; name?: string } | undefined;
-            if (block?.type === "tool_use") {
-              currentToolUse = { id: block.id ?? "", name: block.name ?? "", inputJson: "" };
-            }
-            break;
-          }
-
-          case "content_block_delta": {
-            const delta = event.delta as { type: string; text?: string; partial_json?: string } | undefined;
-            if (delta?.type === "text_delta") {
-              text += delta.text ?? "";
-            } else if (delta?.type === "input_json_delta" && currentToolUse) {
-              currentToolUse.inputJson += delta.partial_json ?? "";
-            }
-            break;
-          }
-
-          case "content_block_stop":
-            if (currentToolUse) {
-              try {
-                toolCalls.push({
-                  id: currentToolUse.id,
-                  name: currentToolUse.name,
-                  input: JSON.parse(currentToolUse.inputJson || "{}"),
-                });
-              } catch {
-                // 工具参数 JSON 解析失败，跳过
-              }
-              currentToolUse = null;
-            }
-            break;
-
-          case "message_delta": {
-            const deltaUsage = (event as { usage?: { output_tokens?: number } }).usage;
-            outputTokens = deltaUsage?.output_tokens ?? 0;
-            break;
-          }
+  await consumeSSEJSON(
+    response,
+    (event) => {
+      switch (event.type) {
+        case "message_start": {
+          const msg = event.message as { usage?: { input_tokens?: number } } | undefined;
+          inputTokens = msg?.usage?.input_tokens ?? 0;
+          break;
         }
-      } catch {
-        // 无效 JSON 行，跳过
+
+        case "content_block_start": {
+          const block = event.content_block as { type: string; id?: string; name?: string } | undefined;
+          if (block?.type === "tool_use") {
+            currentToolUse = { id: block.id ?? "", name: block.name ?? "", inputJson: "" };
+          }
+          break;
+        }
+
+        case "content_block_delta": {
+          const delta = event.delta as { type: string; text?: string; partial_json?: string } | undefined;
+          if (delta?.type === "text_delta") {
+            text += delta.text ?? "";
+          } else if (delta?.type === "input_json_delta" && currentToolUse) {
+            currentToolUse.inputJson += delta.partial_json ?? "";
+          }
+          break;
+        }
+
+        case "content_block_stop":
+          if (currentToolUse) {
+            try {
+              toolCalls.push({
+                id: currentToolUse.id,
+                name: currentToolUse.name,
+                input: JSON.parse(currentToolUse.inputJson || "{}"),
+              });
+            } catch {
+              // 工具参数 JSON 解析失败，跳过
+            }
+            currentToolUse = null;
+          }
+          break;
+
+        case "message_delta": {
+          const deltaUsage = (event as { usage?: { output_tokens?: number } }).usage;
+          outputTokens = deltaUsage?.output_tokens ?? 0;
+          break;
+        }
       }
-    }
-  }
+    },
+    { stopOnDone: false },
+  );
 
   return {
     text: text || undefined,

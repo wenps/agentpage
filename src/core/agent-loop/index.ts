@@ -1,106 +1,47 @@
 /**
- * Agent Loop — 环境无关的 AI 决策循环。
+ * Agent Loop 主流程（中）/ Core environment-agnostic agent loop (EN).
  *
- * 核心 Tool-Use Loop，纯 TypeScript 实现：
+ * 负责消息构建、AI 决策、工具执行、恢复保护与指标汇总。
+ * Orchestrates message build, AI decisions, tool execution, recovery, and metrics.
  *
- *   消息 → AI 思考 → 需要工具？──是──→ 执行工具 → 反馈结果 → 继续思考
- *                       │
- *                       否
- *                       ↓
- *                    返回最终回复
+ * 流程图（文本）：
  *
- * 使用方：WebAgent.chat() 调用
- *
- * 依赖关系（全部环境无关）：
- * - types.ts       → 类型定义（import type，零运行时）
- * - tool-registry.ts → ToolRegistry 实例（注入式，非全局）
+ *   轮次开始
+ *      │
+ *      ├─ 确保快照可用
+ *      ├─ 构建紧凑消息（目标 + 剩余任务 + 执行轨迹 + 快照）
+ *      ├─ 调用模型
+ *      ├─ 无 toolCalls ? 结束 : 执行工具
+ *      ├─ 应用保护机制（冗余拦截/恢复/导航检测/空转/防自转）
+ *      ├─ 刷新快照
+ *      ▼
+ *   下一轮或停机
  */
-import type { AIClient, AIMessage } from "../types.js";
-import { ToolRegistry, type ToolCallResult } from "../tool-registry.js";
+import { DEFAULT_MAX_ROUNDS } from "./constants.js";
+import { getToolAction, toContentString } from "./helpers.js";
+import { readPageSnapshot, readPageUrl, stripSnapshotFromPrompt } from "./snapshot.js";
+import { buildCompactMessages } from "./messages.js";
 import {
-  DEFAULT_ACTION_RECOVERY_ROUNDS,
-  DEFAULT_MAX_ROUNDS,
-} from "./constants.js";
-import {
-  buildCompactMessages,
-  buildToolCallKey,
-  getToolAction,
-  hasToolError,
-  isElementNotFoundResult,
-  readPageSnapshot,
-  readPageUrl,
-  resolveRecoveryWaitMs,
-  sleep,
-  stripSnapshotFromPrompt,
-  toContentString,
-  type ToolTraceEntry,
-} from "./helpers.js";
-
-// ─── 回调接口 ───
-
-/** 工具调用事件回调 — 用于 UI 层实时展示 Agent 进度 */
-export type AgentLoopCallbacks = {
-  /** AI 返回文本回复时触发 */
-  onText?: (text: string) => void;
-  /** AI 请求调用工具时触发（执行前） */
-  onToolCall?: (name: string, input: unknown) => void;
-  /** 工具执行完成时触发 */
-  onToolResult?: (name: string, result: ToolCallResult) => void;
-  /** 每轮循环开始时触发（round 从 0 开始） */
-  onRound?: (round: number) => void;
-  /**
-   * 恢复快照生成前触发（页面 URL 变化或元素定位失败时）。
-   *
-   * 用于 WebAgent 重置 RefStore（清空旧的 hash ID → Element 映射，
-   * 用新 URL 重新生成确定性 hash），确保恢复快照中的 ID 有效。
-   *
-   * @param newUrl 当前页面 URL（URL 变化时传入；元素定位失败时为 undefined）
-   */
-  onBeforeRecoverySnapshot?: (newUrl?: string) => void;
-};
-
-// ─── 参数与结果 ───
-
-export type AgentLoopParams = {
-  /** AI 客户端实例（基于 fetch 的客户端） */
-  client: AIClient;
-  /** 工具注册表实例（由调用方创建并注册好工具） */
-  registry: ToolRegistry;
-  /** 系统提示词（由调用方构建，适配各自环境） */
-  systemPrompt: string;
-  /** 用户消息 */
-  message: string;
-  /** 历史对话消息（用于多轮记忆，按时间顺序排列） */
-  history?: AIMessage[];
-  /** 干运行模式：打印工具调用但不执行 */
-  dryRun?: boolean;
-  /** 最大工具调用轮次（默认 10） */
-  maxRounds?: number;
-  /** 事件回调 */
-  callbacks?: AgentLoopCallbacks;
-};
-
-export type AgentLoopResult = {
-  /** AI 的最终文本回复 */
-  reply: string;
-  /** 所有工具调用记录 */
-  toolCalls: Array<{ name: string; input: unknown; result: ToolCallResult }>;
-  /** 本轮完整对话消息（含历史 + 本轮，用于多轮记忆累积） */
-  messages: AIMessage[];
-};
-
-type PageContextState = {
-  currentUrl?: string;
-  latestSnapshot?: string;
-};
+  checkRedundantSnapshot,
+  applySnapshotDebounce,
+  handleElementRecovery,
+  handleNavigationUrlChange,
+  detectIdleLoop,
+} from "./recovery.js";
+import type {
+  AgentLoopParams,
+  AgentLoopResult,
+  AgentLoopMetrics,
+  PageContextState,
+  ToolTraceEntry,
+} from "./types.js";
+import type { AIMessage } from "../types.js";
 
 /**
- * 执行 Agent 决策循环（环境无关）。
+ * 执行 Agent 循环（中）/ Execute the agent loop (EN).
  *
- * 完整流程：
- * 1. 获取已注册的工具列表
- * 2. 循环：发消息给 AI → 检查是否返回 tool_call → 执行 → 反馈 → 继续
- * 3. AI 不再调用工具时，返回最终回复
+ * 每轮：确保快照 → 构建消息 → 调用 AI → 执行工具 → 保护处理 → 刷新快照。
+ * Per round: ensure snapshot -> build messages -> call AI -> execute tools -> apply protections -> refresh snapshot.
  */
 export async function executeAgentLoop(
   params: AgentLoopParams,
@@ -116,30 +57,127 @@ export async function executeAgentLoop(
     callbacks,
   } = params;
 
+  // 固定依赖与运行态容器（中）/ Static dependencies and runtime containers (EN).
   const tools = registry.getDefinitions();
   const allToolCalls: AgentLoopResult["toolCalls"] = [];
   const fullToolTrace: ToolTraceEntry[] = [];
   const actionRecoveryAttempts = new Map<string, number>();
   const pageContext: PageContextState = {};
-  let finalReply = "";
-  let consecutiveSnapshotCalls = 0;
-  /** 连续"纯信息查询"轮次计数 — 检测 AI 空转 */
-  let consecutiveReadOnlyRounds = 0;
-  /** 纯信息查询工具（不改变页面状态） */
-  const READ_ONLY_TOOLS = new Set(["page_info"]);
 
+  // 最终输出（中）/ Final output state (EN).
+  let finalReply = "";
+
+  // 循环控制状态（中）/ Loop control state (EN).
+  let consecutiveSnapshotCalls = 0;
+  let consecutiveReadOnlyRounds = 0;
+  let usedRounds = 0;
+
+  // token 统计（中）/ Token accounting (EN).
+  let inputTokens = 0;
+  let outputTokens = 0;
+  // 渐进式任务状态（中）/ Progressive task state (EN).
+  // remainingInstruction: 当前轮次要继续消费的剩余文本。
+  // previousRoundTasks: 上一轮已经执行过的任务数组，用于提醒 AI 不要原样重复。
+  // lastPlannedBatchKey + consecutiveSamePlannedBatch: 防止 AI 连续给出相同任务批次导致自转。
+  // lastRoundHadError: 如果上一轮有错误，不触发“重复批次即停机”，避免误停。
+  let remainingInstruction = message.trim();
+  let previousRoundTasks: string[] = [];
+  let lastPlannedBatchKey = "";
+  let consecutiveSamePlannedBatch = 0;
+  let lastRoundHadError = false;
+  // 恢复与拦截统计（中）/ Recovery/interception counters (EN).
+  let recoveryCount = 0;
+  let redundantInterceptCount = 0;
+
+  // 快照体积统计（中）/ Snapshot size metrics (EN).
+  let snapshotReadCount = 0;
+  let snapshotSizeTotal = 0;
+  let snapshotSizeMax = 0;
+
+  /**
+   * 记录快照统计（中）/ Record snapshot metrics (EN).
+   *
+   * 用于输出可观测指标：读取次数、平均长度、最大长度。
+   * Used for observability metrics: read count, avg size, max size.
+   */
+  const recordSnapshotStats = (snapshot: string | undefined): void => {
+    if (typeof snapshot !== "string") return;
+    snapshotReadCount += 1;
+    snapshotSizeTotal += snapshot.length;
+    if (snapshot.length > snapshotSizeMax) snapshotSizeMax = snapshot.length;
+  };
+
+  /**
+   * 刷新页面快照（中）/ Refresh page snapshot (EN).
+   *
+   * 只做两件事：读取最新快照 + 更新快照统计。
+   * Does exactly two things: read latest snapshot + update metrics.
+   */
+  const refreshSnapshot = async (): Promise<void> => {
+    pageContext.latestSnapshot = await readPageSnapshot(registry);
+    recordSnapshotStats(pageContext.latestSnapshot);
+  };
+
+  /**
+   * 追加工具轨迹（中）/ Append tool trace entry (EN).
+   *
+   * 同时写入：
+   * - allToolCalls：对外返回结果
+   * - fullToolTrace：下一轮消息上下文
+   */
+  const appendToolTrace = (
+    round: number,
+    name: string,
+    input: unknown,
+    result: AgentLoopResult["toolCalls"][number]["result"],
+  ): void => {
+    allToolCalls.push({ name, input, result });
+    fullToolTrace.push({ round, name, input, result });
+  };
+
+  /**
+   * 生成任务数组（中）/ Build normalized task array (EN).
+   *
+   * 将本轮 toolCalls 归一化成稳定字符串数组，便于：
+   * - 回传到下一轮消息上下文（提醒已执行计划）
+   * - 进行“是否与上一轮完全相同”的比较
+   */
+  const buildTaskArray = (toolCalls: Array<{ name: string; input: unknown }>): string[] =>
+    toolCalls.map(tc => {
+      const inputText = JSON.stringify(tc.input);
+      return `${tc.name}:${inputText}`;
+    });
+
+  /**
+   * 解析 REMAINING 协议（中）/ Parse REMAINING protocol from model text (EN).
+   *
+   * 支持：
+   * - `REMAINING: <text>` → 继续下一轮消费该剩余文本
+   * - `REMAINING: DONE`   → 剩余任务为空
+   * 返回 null 表示本轮没有提供 REMAINING 标记。
+   */
+  const parseRemainingInstruction = (text: string | undefined): string | null => {
+    if (!text) return null;
+    const match = text.match(/REMAINING\s*:\s*([\s\S]*)$/i);
+    if (!match) return null;
+    const value = match[1].trim();
+    return /^done$/i.test(value) ? "" : value;
+  };
+
+  // 主循环（中）/ Main round loop (EN).
   for (let round = 0; round < maxRounds; round++) {
     callbacks?.onRound?.(round);
+    usedRounds = round + 1;
 
-    // 进入本轮前，确保有一份可用快照（由 Agent 主动维护）
+    // ═══ 阶段 1：确保快照 ═══
     if (!pageContext.latestSnapshot) {
-      pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
+      await refreshSnapshot();
     }
 
-    // ─── 构建紧凑消息：每轮从 trace 重建，而非累积 message 对 ───
-    const effectivePrompt = pageContext.latestSnapshot
-      ? stripSnapshotFromPrompt(systemPrompt)
-      : systemPrompt;
+    // ═══ 阶段 2：构建紧凑消息 ═══
+    // 每轮消息都自带快照（buildCompactMessages 注入），因此始终剥离
+    // system prompt 中的旧快照，避免重复。
+    const effectivePrompt = stripSnapshotFromPrompt(systemPrompt);
 
     const chatMessages = buildCompactMessages(
       message,
@@ -147,24 +185,53 @@ export async function executeAgentLoop(
       pageContext.latestSnapshot,
       pageContext.currentUrl,
       history,
+      remainingInstruction,
+      previousRoundTasks,
     );
 
+    // ═══ 阶段 3：调用 AI ═══
     const response = await client.chat({
       systemPrompt: effectivePrompt,
       messages: chatMessages,
       tools,
     });
 
-    // 没有工具调用 → 循环结束，拿到最终回复
+    // 计费/观测数据累计（中）/ Aggregate usage for observability (EN).
+    inputTokens += response.usage?.inputTokens ?? 0;
+    outputTokens += response.usage?.outputTokens ?? 0;
+
+    // 渐进式协议：如果模型返回了 REMAINING，就覆盖下一轮要消费的文本。
+    // Progressive protocol: when model returns REMAINING, update next-round instruction.
+    const parsedRemainingInstruction = parseRemainingInstruction(response.text);
+    if (parsedRemainingInstruction !== null) {
+      remainingInstruction = parsedRemainingInstruction;
+    }
+
+    // 没有工具调用 → 任务完成，拿到最终回复
     if (!response.toolCalls || response.toolCalls.length === 0) {
       finalReply = response.text ?? "";
       if (finalReply) callbacks?.onText?.(finalReply);
       break;
     }
 
-    // 工具调用轮次不展示长篇规划文本，避免“先规划再执行”的冗余体验
-    if (response.text && response.toolCalls.length === 0) {
-      callbacks?.onText?.(response.text);
+    const plannedBatchKey = JSON.stringify(
+      response.toolCalls.map(tc => ({ name: tc.name, input: tc.input })),
+    );
+    // 比较“本轮计划”与“上一轮计划”是否完全一致。
+    // Compare whether current planned batch is identical to the previous one.
+    if (plannedBatchKey === lastPlannedBatchKey) {
+      consecutiveSamePlannedBatch += 1;
+    } else {
+      consecutiveSamePlannedBatch = 1;
+      lastPlannedBatchKey = plannedBatchKey;
+    }
+
+    // 防自转：连续两轮给出相同计划且上一轮无错误，判定任务已完成或模型卡住，直接结束。
+    // Anti-spin: if same planned batch appears twice and previous round had no error, stop the request.
+    if (consecutiveSamePlannedBatch >= 2 && !lastRoundHadError) {
+      finalReply = response.text?.trim() || "任务已完成。";
+      if (finalReply) callbacks?.onText?.(finalReply);
+      break;
     }
 
     // ─── Dry-run 模式 ───
@@ -185,41 +252,34 @@ export async function executeAgentLoop(
       break;
     }
 
-    // ─── 执行工具调用 ───
-    // 同一轮内的多个工具调用，URL 只在轮次开头检查一次
+    // ═══ 阶段 4：执行工具调用（带保护机制）═══
+
+    // 轮次开头检查一次 URL
     const latestUrl = await readPageUrl(registry);
     if (latestUrl) {
       if (!pageContext.currentUrl) {
         pageContext.currentUrl = latestUrl;
       } else if (latestUrl !== pageContext.currentUrl) {
-        // URL 已变 — 拍新快照
         pageContext.currentUrl = latestUrl;
         callbacks?.onBeforeRecoverySnapshot?.(latestUrl);
-        pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
+        await refreshSnapshot();
       }
     }
 
-    // 批量执行所有工具调用 — 不在中间插入额外检查
+    // 批量执行所有工具调用
+    // roundHasError 用于控制“重复批次停机”：上一轮有错误时，不应武断终止。
+    // roundHasError guards anti-spin stop: do not hard-stop if previous round had errors.
+    let roundHasError = false;
     for (const tc of response.toolCalls) {
-      // 首轮或已有最新快照时，跳过冗余 page_info(snapshot)
-      if (
-        tc.name === "page_info" &&
-        getToolAction(tc.input) === "snapshot" &&
-        pageContext.latestSnapshot
-      ) {
-        const skipped: ToolCallResult = {
-          content:
-            "Skip redundant snapshot: latest snapshot is already available for planning. Execute actionable tools directly.",
-          details: {
-            error: true,
-            code: "REDUNDANT_SNAPSHOT_SKIPPED",
-            round,
-          },
-        };
 
-        allToolCalls.push({ name: tc.name, input: tc.input, result: skipped });
-        fullToolTrace.push({ round, name: tc.name, input: tc.input, result: skipped });
-        callbacks?.onToolResult?.(tc.name, skipped);
+      // 保护 1：冗余快照拦截
+      const redundant = checkRedundantSnapshot(
+        tc.name, tc.input, pageContext.latestSnapshot, round,
+      );
+      if (redundant) {
+        appendToolTrace(round, tc.name, tc.input, redundant);
+        redundantInterceptCount += 1;
+        callbacks?.onToolResult?.(tc.name, redundant);
         continue;
       }
 
@@ -228,121 +288,102 @@ export async function executeAgentLoop(
       // 执行工具
       let result = await registry.dispatch(tc.name, tc.input);
 
-      // 连续快照防抖：同页下反复 snapshot 时提示直接执行剩余动作
-      if (tc.name === "page_info" && getToolAction(tc.input) === "snapshot") {
-        consecutiveSnapshotCalls++;
-        if (consecutiveSnapshotCalls >= 2) {
-          result = {
-            content: [
-              toContentString(result.content),
-              "Redundant snapshot detected. Continue with remaining actionable steps using the latest snapshot; avoid additional snapshot unless navigation or uncertainty changes.",
-            ].join("\n"),
-            details: {
-              error: true,
-              code: "REDUNDANT_SNAPSHOT",
-              consecutiveSnapshotCalls,
-            },
-          };
-        }
-      } else {
-        consecutiveSnapshotCalls = 0;
+      // 保护 2：连续快照防抖
+      const debounced = applySnapshotDebounce(
+        tc.name, tc.input, result, consecutiveSnapshotCalls,
+      );
+      result = debounced.result;
+      consecutiveSnapshotCalls = debounced.consecutiveCount;
+
+      // 保护 3：元素未找到自动恢复
+      const recovered = await handleElementRecovery(
+        tc.name, tc.input, result,
+        actionRecoveryAttempts, registry, pageContext, callbacks,
+      );
+      if (recovered) result = recovered;
+      if (
+        recovered?.details &&
+        typeof recovered.details === "object" &&
+        (recovered.details as { code?: unknown }).code === "ELEMENT_NOT_FOUND_RECOVERY"
+      ) {
+        recoveryCount += 1;
       }
 
-      // 元素未找到 → 自动恢复（刷新快照）
-      if (tc.name === "dom" && isElementNotFoundResult(result)) {
-        const key = buildToolCallKey(tc.name, tc.input);
-        const attempts = (actionRecoveryAttempts.get(key) ?? 0) + 1;
-        actionRecoveryAttempts.set(key, attempts);
-        const recoveryWaitMs = resolveRecoveryWaitMs(tc.input);
-
-        if (attempts <= DEFAULT_ACTION_RECOVERY_ROUNDS) {
-          await sleep(recoveryWaitMs);
-          callbacks?.onBeforeRecoverySnapshot?.();
-          pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
-
-          result = {
-            content: [
-              toContentString(result.content),
-              `Recovery ${attempts}/${DEFAULT_ACTION_RECOVERY_ROUNDS}: snapshot refreshed, re-locate target.`,
-            ].join("\n"),
-            details: {
-              error: true,
-              code: "ELEMENT_NOT_FOUND_RECOVERY",
-              recoveryAttempt: attempts,
-              recoveryMaxRounds: DEFAULT_ACTION_RECOVERY_ROUNDS,
-            },
-          };
-        } else {
-          result = {
-            content: [
-              toContentString(result.content),
-              `Max recovery attempts (${DEFAULT_ACTION_RECOVERY_ROUNDS}) reached. Try a different target.`,
-            ].join("\n"),
-            details: {
-              error: true,
-              code: "ELEMENT_NOT_FOUND_MAX_RECOVERY_REACHED",
-              recoveryAttempt: attempts,
-              recoveryMaxRounds: DEFAULT_ACTION_RECOVERY_ROUNDS,
-            },
-          };
-        }
+      appendToolTrace(round, tc.name, tc.input, result);
+      if (result.details && typeof result.details === "object") {
+        roundHasError = roundHasError || Boolean((result.details as { error?: unknown }).error);
       }
 
-      allToolCalls.push({ name: tc.name, input: tc.input, result });
-      fullToolTrace.push({ round, name: tc.name, input: tc.input, result });
-
-      // 捕获显式 page_info(snapshot) 结果
+      // 捕获显式 snapshot 结果
       if (tc.name === "page_info" && getToolAction(tc.input) === "snapshot") {
         pageContext.latestSnapshot = toContentString(result.content);
+        recordSnapshotStats(pageContext.latestSnapshot);
       }
 
-      // 导航后主动检测 URL 变化并拍快照
-      if (tc.name === "navigate") {
-        const action = getToolAction(tc.input);
-        if (
-          (action === "goto" || action === "back" || action === "forward" || action === "reload") &&
-          !hasToolError(result)
-        ) {
-          const newUrl = await readPageUrl(registry);
-          if (newUrl && newUrl !== pageContext.currentUrl) {
-            pageContext.currentUrl = newUrl;
-            callbacks?.onBeforeRecoverySnapshot?.(newUrl);
-            pageContext.latestSnapshot = await readPageSnapshot(registry, 8);
-          }
-        }
-      }
+      // 保护 4：导航后 URL 变化检测
+      await handleNavigationUrlChange(
+        tc.name, tc.input, result, registry, pageContext, callbacks,
+      );
 
       callbacks?.onToolResult?.(tc.name, result);
     }
+    // 将本轮执行状态传给下一轮上下文。
+    // Carry current execution state into next round context.
+    lastRoundHadError = roundHasError;
+    previousRoundTasks = buildTaskArray(response.toolCalls);
 
-    // ─── 空转检测：AI 连续只调只读工具 → 强制终止 ───
-    const allReadOnly = response.toolCalls!.every(tc => READ_ONLY_TOOLS.has(tc.name));
-    if (allReadOnly) {
-      consecutiveReadOnlyRounds++;
-      if (consecutiveReadOnlyRounds >= 2) {
-        // AI 连续 2 轮只做查询不做操作 → 任务可能已完成
-        finalReply = response.text || "任务已完成。";
-        if (finalReply) callbacks?.onText?.(finalReply);
-        break;
-      }
-    } else {
-      consecutiveReadOnlyRounds = 0;
+    // 保护 5：空转检测
+    const toolCallNames = response.toolCalls.map(tc => tc.name);
+    const idleResult = detectIdleLoop(toolCallNames, consecutiveReadOnlyRounds);
+    if (idleResult === -1) {
+      finalReply = response.text || "任务已完成。";
+      if (finalReply) callbacks?.onText?.(finalReply);
+      break;
     }
+    consecutiveReadOnlyRounds = idleResult;
 
-    // 一轮工具批量执行完成后，统一刷新一次快照，供下一轮直接使用
-    pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
-
-    // 下一轮从 trace 重建紧凑消息，无需累积
+    // ═══ 阶段 5：刷新快照（供下一轮使用）═══
+    await refreshSnapshot();
   }
 
   // 构建紧凑的 result.messages 供多轮记忆使用
+  // Build compact result.messages for optional multi-turn memory reuse.
   const resultMessages: AIMessage[] = [...(history ?? []), { role: "user", content: message }];
   if (finalReply) {
     resultMessages.push({ role: "assistant", content: finalReply });
   }
 
-  return { reply: finalReply, toolCalls: allToolCalls, messages: resultMessages };
+  // 结果统计（中）/ Compute success/failure metrics (EN).
+  const successfulToolCalls = allToolCalls.filter(tc => {
+    const details = tc.result.details;
+    return !(details && typeof details === "object" && Boolean((details as { error?: unknown }).error));
+  }).length;
+  const failedToolCalls = allToolCalls.length - successfulToolCalls;
+
+  const metrics: AgentLoopMetrics = {
+    roundCount: usedRounds,
+    totalToolCalls: allToolCalls.length,
+    successfulToolCalls,
+    failedToolCalls,
+    toolSuccessRate: allToolCalls.length > 0
+      ? Number((successfulToolCalls / allToolCalls.length).toFixed(4))
+      : 1,
+    recoveryCount,
+    redundantInterceptCount,
+    snapshotReadCount,
+    latestSnapshotSize: pageContext.latestSnapshot?.length ?? 0,
+    avgSnapshotSize: snapshotReadCount > 0 ? Math.round(snapshotSizeTotal / snapshotReadCount) : 0,
+    maxSnapshotSize: snapshotSizeMax,
+    inputTokens,
+    outputTokens,
+  };
+
+  // 统一发出指标回调（中）/ Emit metrics callback once per chat (EN).
+  callbacks?.onMetrics?.(metrics);
+
+  return { reply: finalReply, toolCalls: allToolCalls, messages: resultMessages, metrics };
 }
 
-// ─── Re-exports ───
-export { wrapSnapshot } from "./helpers.js";
+// ─── Re-exports（维持外部 API 不变）───
+export { wrapSnapshot } from "./snapshot.js";
+export type { AgentLoopParams, AgentLoopResult, AgentLoopCallbacks, AgentLoopMetrics } from "./types.js";

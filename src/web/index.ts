@@ -38,12 +38,12 @@ import { createAIClient } from "../core/ai-client/index.js";
 import type { AIClient } from "../core/types.js";
 import { ToolRegistry, type ToolDefinition } from "../core/tool-registry.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
-import { generateSnapshot, type SnapshotOptions } from "./page-info-tool.js";
-import { createDomTool, setActiveRefStore } from "./dom-tool.js";
-import { createNavigateTool } from "./navigate-tool.js";
-import { createPageInfoTool } from "./page-info-tool.js";
-import { createWaitTool } from "./wait-tool.js";
-import { createEvaluateTool } from "./evaluate-tool.js";
+import { generateSnapshot, type SnapshotOptions } from "./tools/page-info-tool.js";
+import { createDomTool, setActiveRefStore } from "./tools/dom-tool.js";
+import { createNavigateTool } from "./tools/navigate-tool.js";
+import { createPageInfoTool } from "./tools/page-info-tool.js";
+import { createWaitTool } from "./tools/wait-tool.js";
+import { createEvaluateTool } from "./tools/evaluate-tool.js";
 import { RefStore } from "./ref-store.js";
 
 // ─── 回调类型 ───
@@ -269,7 +269,10 @@ export class WebAgent {
     if (this.autoSnapshot) {
       try {
         const snapshot = generateSnapshot(document.body, {
-          maxDepth: 6,
+          maxDepth: 8,
+          viewportOnly: false,
+          maxNodes: 500,
+          maxChildren: 30,
           ...this.snapshotOptions,
           refStore,
         });
@@ -347,12 +350,15 @@ export class WebAgent {
 // ─── Re-exports ───
 // 从入口文件统一导出所有公共 API，消费方只需 import from "agentpage"
 
-export { generateSnapshot, type SnapshotOptions } from "./page-info-tool.js";
-export { createDomTool } from "./dom-tool.js";
-export { createNavigateTool } from "./navigate-tool.js";
-export { createPageInfoTool } from "./page-info-tool.js";
-export { createWaitTool } from "./wait-tool.js";
-export { createEvaluateTool } from "./evaluate-tool.js";
+export {
+  generateSnapshot,
+  type SnapshotOptions,
+} from "./tools/page-info-tool.js";
+export { createDomTool } from "./tools/dom-tool.js";
+export { createNavigateTool } from "./tools/navigate-tool.js";
+export { createPageInfoTool } from "./tools/page-info-tool.js";
+export { createWaitTool } from "./tools/wait-tool.js";
+export { createEvaluateTool } from "./tools/evaluate-tool.js";
 export {
   createProxyExecutor,
   registerToolHandler,

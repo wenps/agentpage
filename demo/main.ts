@@ -147,6 +147,10 @@ agent.callbacks = {
     appendMsg("tool-result", `📸 页面快照已生成（${lines} 行 / ${snapshot.length} 字符）`);
     statusEl.textContent = "分析页面快照...";
   },
+  onMetrics: (metrics) => {
+    appendMsg("system", `📊 运行指标: ${JSON.stringify(metrics)}`);
+    console.log("[AutoPilot Metrics]", metrics);
+  },
 };
 
 // ─── 从 localStorage 恢复 Token ───

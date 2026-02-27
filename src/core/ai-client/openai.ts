@@ -1,38 +1,23 @@
 /**
- * OpenAI / Copilot（GitHub Models）AI 客户端。
- *
- * OpenAI 和 Copilot 使用相同的 API 格式（Chat Completions API），
- * 区别仅在端点 URL 和认证方式：
- * - OpenAI   → https://api.openai.com/v1/chat/completions + Bearer <API Key>
- * - Copilot  → https://models.inference.ai.azure.com/chat/completions + Bearer <GitHub PAT>
- *
- * 提供两层能力：
- * - 类：OpenAIClient（继承 BaseAIClient）— 封装完整 fetch 流程
- * - 函数：buildOpenAIRequest / parseOpenAIResponse — 底层格式转换
- *
- * 继承关系：
- *   BaseAIClient（custom.ts）
- *     └── OpenAIClient（本文件）— 覆盖 chat()，内部调用 build → fetch → parse
- *
- * 使用方：
- *   ai-client/openai.ts ←── ai-client/index.ts（主入口）
+ * OpenAI/Copilot 客户端（中）/ OpenAI-compatible client implementation (EN).
  */
 import type { AIChatResponse, AIMessage, AIToolCall } from "../types.js";
 import type { AIClientConfig, ChatParams, ChatRequestInit } from "./index.js";
 import { BaseAIClient } from "./custom.js";
 import type { ChatHandlerParams } from "./custom.js";
+import { consumeSSEJSON } from "./sse.js";
 import { resolveBaseURL, cleanSchema } from "./constants.js";
 
 // ─── OpenAI 原始 API 响应类型 ───
 
-/** OpenAI tool_calls 中单个工具调用的原始格式 */
+/** OpenAI 工具调用原始类型（中）/ Raw OpenAI tool_call shape (EN). */
 type OpenAIRawToolCall = {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
 };
 
-/** OpenAI Chat Completions API 的原始 JSON 响应 */
+/** OpenAI 原始响应类型（中）/ Raw OpenAI chat completion response (EN). */
 type OpenAIRawResponse = {
   choices?: Array<{
     message: {
@@ -49,31 +34,7 @@ type OpenAIRawResponse = {
 // ─── OpenAIClient 类 ───
 
 /**
- * OpenAI / Copilot AI 客户端 — 继承 BaseAIClient。
- *
- * 封装完整的 OpenAI Chat Completions API 调用流程：
- * 1. buildOpenAIRequest() → 构建 HTTP 请求
- * 2. fetch() → 发送请求
- * 3. parseOpenAIResponse() → 解析响应为统一格式
- *
- * 使用示例：
- * ```ts
- * const client = new OpenAIClient({
- *   provider: "openai",
- *   model: "gpt-4o",
- *   apiKey: "sk-xxx",
- * });
- * const response = await client.chat({ systemPrompt, messages, tools });
- * ```
- *
- * 也可用于 Copilot（GitHub Models）：
- * ```ts
- * const client = new OpenAIClient({
- *   provider: "copilot",
- *   model: "gpt-4o",
- *   apiKey: "ghp_xxx",
- * });
- * ```
+ * OpenAIClient 类（中）/ OpenAIClient class for OpenAI & Copilot (EN).
  */
 export class OpenAIClient extends BaseAIClient {
   /** AI 客户端配置（provider / model / apiKey / baseURL） */
@@ -130,15 +91,7 @@ export class OpenAIClient extends BaseAIClient {
 // ─── 底层 API：请求构建 ───
 
 /**
- * 将统一格式的 ChatParams 转换为 OpenAI Chat Completions API 请求。
- *
- * 转换逻辑：
- * - system prompt → `{ role: "system", content }` 消息
- * - 工具定义 → `tools` 数组（function calling 格式）
- * - 工具结果 → 拆分为多条 `{ role: "tool", tool_call_id }` 消息
- * - AI 回复含工具调用 → `tool_calls` 字段
- *
- * 默认参数：temperature=0.3, max_tokens=8192, tool_choice="auto"
+ * 构建 OpenAI 请求（中）/ Build OpenAI chat request payload (EN).
  */
 export function buildOpenAIRequest(
   config: AIClientConfig,
@@ -193,14 +146,7 @@ export function buildOpenAIRequest(
 // ─── 响应解析 ───
 
 /**
- * 将 OpenAI Chat Completions API 原始响应解析为统一的 AIChatResponse。
- *
- * 解析要点：
- * - 文本回复 → `choice.message.content`
- * - 工具调用 → `choice.message.tool_calls`，arguments 为 JSON 字符串需 parse
- * - Token 用量 → `usage.prompt_tokens` / `usage.completion_tokens`
- *
- * @throws 无有效 choice 时抛出 Error
+ * 解析 OpenAI 响应（中）/ Parse raw OpenAI response into AIChatResponse (EN).
  */
 export function parseOpenAIResponse(data: unknown): AIChatResponse {
   const d = data as OpenAIRawResponse;
@@ -231,12 +177,7 @@ export function parseOpenAIResponse(data: unknown): AIChatResponse {
 // ─── 内部辅助函数 ───
 
 /**
- * 将统一消息格式转换为 OpenAI 消息数组。
- *
- * 三种特殊消息的处理：
- * 1. tool 消息（工具结果）→ 每个结果拆分为单独的 `role: "tool"` 消息
- * 2. assistant 含 toolCalls → 附带 `tool_calls` 字段
- * 3. 其他消息 → 直接映射 role + content
+ * 消息转换（中）/ Convert unified messages to OpenAI format (EN).
  */
 function convertMessages(
   systemPrompt: string,
@@ -287,14 +228,14 @@ function convertMessages(
 
 // ─── 流式响应解析 ───
 
-/** SSE 流中 tool_calls delta 的类型 */
+/** 流式 tool_call 增量类型（中）/ Tool-call delta type in SSE stream (EN). */
 type OpenAIStreamToolCallDelta = {
   index: number;
   id?: string;
   function?: { name?: string; arguments?: string };
 };
 
-/** SSE 流中单个 chunk 的类型 */
+/** 流式 chunk 类型（中）/ SSE chunk type (EN). */
 type OpenAIStreamChunk = {
   choices?: Array<{
     delta: {
@@ -306,15 +247,7 @@ type OpenAIStreamChunk = {
 };
 
 /**
- * 从 OpenAI SSE 流解析为统一的 AIChatResponse。
- *
- * 实现原理：
- * - SSE 每行格式：`data: {json}`，结束标志 `data: [DONE]`
- * - 文本内容通过 `delta.content` 跨 chunk 累积
- * - 工具调用通过 `delta.tool_calls[].index` 识别，arguments 跨 chunk 拼接
- * - 用量信息需通过 `stream_options: { include_usage: true }` 请求才会返回
- *
- * 如果 response.body 不可用（极少数环境），自动回退到非流式解析。
+ * 解析 OpenAI SSE（中）/ Parse OpenAI SSE stream into unified response (EN).
  */
 export async function parseOpenAIStream(
   response: Response,
@@ -326,97 +259,42 @@ export async function parseOpenAIStream(
     return parseOpenAIResponse(data);
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-
   let text = "";
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
   let usage: AIChatResponse["usage"];
-  let buffer = "";
-  let streamDone = false;
+  await consumeSSEJSON(
+    response,
+    (event) => {
+      const chunk = event as OpenAIStreamChunk;
+      const delta = chunk.choices?.[0]?.delta;
 
-  async function readWithTimeout() {
-    return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`SSE read timeout (${readTimeoutMs}ms)`));
-      }, readTimeoutMs);
+      if (delta?.content) text += delta.content;
 
-      reader.read().then(
-        (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      );
-    });
-  }
-
-  while (!streamDone) {
-    const { done, value } = await readWithTimeout();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    // 按换行分割，保留不完整的最后一行
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith(":")) continue;
-      if (trimmed === "data: [DONE]" || trimmed === "data:[DONE]") {
-        streamDone = true;
-        break;
-      }
-      if (!trimmed.startsWith("data:")) continue;
-
-      // 兼容 `data:{...}` 与 `data: {...}` 两种格式
-      const payload = trimmed.slice(5).trim();
-      if (!payload) continue;
-
-      try {
-        const chunk = JSON.parse(payload) as OpenAIStreamChunk;
-        const delta = chunk.choices?.[0]?.delta;
-
-        // 累积文本
-        if (delta?.content) text += delta.content;
-
-        // 累积工具调用（按 index 分组）
-        if (delta?.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            const existing = toolCallMap.get(idx);
-            if (existing) {
-              if (tc.function?.arguments) existing.arguments += tc.function.arguments;
-            } else {
-              toolCallMap.set(idx, {
-                id: tc.id ?? "",
-                name: tc.function?.name ?? "",
-                arguments: tc.function?.arguments ?? "",
-              });
-            }
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          const existing = toolCallMap.get(idx);
+          if (existing) {
+            if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+          } else {
+            toolCallMap.set(idx, {
+              id: tc.id ?? "",
+              name: tc.function?.name ?? "",
+              arguments: tc.function?.arguments ?? "",
+            });
           }
         }
-
-        // 用量信息（流式需 stream_options.include_usage）
-        if (chunk.usage) {
-          usage = {
-            inputTokens: chunk.usage.prompt_tokens ?? 0,
-            outputTokens: chunk.usage.completion_tokens ?? 0,
-          };
-        }
-      } catch {
-        // 无效 JSON 行，跳过
       }
-    }
-  }
 
-  if (streamDone) {
-    await reader.cancel().catch(() => undefined);
-  }
+      if (chunk.usage) {
+        usage = {
+          inputTokens: chunk.usage.prompt_tokens ?? 0,
+          outputTokens: chunk.usage.completion_tokens ?? 0,
+        };
+      }
+    },
+    { readTimeoutMs, stopOnDone: true },
+  );
 
   // 组装工具调用
   const toolCalls: AIToolCall[] = [];

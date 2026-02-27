@@ -1,25 +1,20 @@
 # AutoPilot
 
-> **浏览器内嵌 AI Agent SDK** — 让 AI 通过 tool-calling 操作你的网页。
+> 浏览器内嵌 AI Agent SDK：让 AI 通过 tool-calling 操作网页。
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-一行代码给你的网站加上 AI Agent 能力：用户说一句话，AI 自动点击按钮、填写表单、读取数据、执行 JS。
-
-基于原生 `fetch` 的纯浏览器 AI 客户端，支持 **OpenAI** / **GitHub Copilot** / **Anthropic**。唯一运行时依赖：`@sinclair/typebox`。
+AutoPilot 的目标不是生成文本，而是在浏览器中完成真实任务：点击、填写、导航、等待、执行脚本，并在每一轮根据最新页面状态持续推进。
 
 ---
 
-## 核心特性
+## 项目定位
 
-- **内嵌式 Agent** — 运行在页面内部，直接操作 DOM，无需截图、无需外部浏览器进程
-- **零 SDK 依赖** — 使用原生 `fetch` 连接 AI，不引入 openai / anthropic SDK
-- **DOM 快照 + Ref 路径** — 自动生成页面结构快照，AI 通过 ref 路径精确定位元素，无需猜测选择器
-- **5 个内置工具** — DOM 操作、页面导航、页面信息、等待元素、JS 执行
-- **可扩展** — 通过 `registerTool()` 添加自定义工具
-- **多轮记忆** — 可开关的对话历史，Agent 能记住上下文
-- **Chrome Extension 支持** — 内置 Service Worker ↔ Content Script 消息桥
-- **~2000 行** — 轻量、可审计、无黑箱
+- 运行环境：浏览器（可扩展到 Chrome Extension）
+- 核心机制：快照驱动 + 工具调用 + 增量消费
+- 架构分层：
+  - `core`：环境无关引擎（Agent Loop、AI Client、Tool Registry）
+  - `web`：浏览器能力实现（DOM/导航/快照/等待/执行）
 
 ---
 
@@ -31,298 +26,327 @@
 pnpm install
 ```
 
-### 使用
+### 基本使用
 
-```typescript
-import { WebAgent } from "autopilot/web";
+```ts
+import { WebAgent } from "agentpage";
 
 const agent = new WebAgent({
   token: "your-api-key",
-  provider: "copilot",    // "copilot" | "openai" | "anthropic"
-  model: "gpt-4o",
-  memory: true,           // 开启多轮记忆
-  autoSnapshot: true,     // 每次对话前自动生成 DOM 快照（默认开启）
+  provider: "deepseek", // openai | copilot | anthropic | deepseek
+  model: "deepseek-chat",
+  memory: true,
+  autoSnapshot: true,
+  stream: true,
 });
 
-agent.registerTools();    // 注册 5 个内置 Web 工具
+agent.registerTools();
 
 agent.callbacks = {
-  onText: (text) => console.log("AI:", text),
-  onToolCall: (name, input) => console.log("🔧", name),
-  onToolResult: (name, result) => console.log("✅", name, result.content),
-  onSnapshot: (snapshot) => console.log("📸 快照已生成"),
+  onRound: (round) => console.log("round", round + 1),
+  onToolCall: (name, input) => console.log("tool", name, input),
+  onToolResult: (name, result) => console.log("result", name, result.content),
+  onText: (text) => console.log("assistant", text),
 };
 
-const result = await agent.chat("把搜索框填上 'AutoPilot' 然后点搜索按钮");
+const result = await agent.chat("打开任务弹窗，填写标题和优先级，然后提交");
 console.log(result.reply);
 ```
 
-### 运行 Demo
+### 启动 Demo
 
 ```bash
-pnpm demo  # 启动 Vite 开发服务器，端口 3000
+pnpm demo
 ```
-
-Demo 页面提供开箱即用的聊天 UI（暗色主题），包含：
-- Token 输入（localStorage 持久化）
-- 模型选择（gpt-4o / gpt-4o-mini / o3-mini）
-- Dry-run 开关 & 多轮记忆开关
-- 6 个快捷测试按钮（页面信息、DOM 快照、点击、链接、滚动、DOM 计数）
-- 实时展示工具调用和结果
 
 ---
 
-## 架构
+## 当前目录结构（权威）
 
-```
+```text
 src/
-├── core/                        # 🔷 共享引擎（零环境依赖，纯 TypeScript + fetch）
-│   ├── types.ts                 #    类型：AIClient, AIMessage, AIChatResponse, AIToolCall
-│   ├── tool-registry.ts         #    ToolRegistry 类 + 辅助函数（readStringParam 等）
-│   ├── agent-loop.ts            #    决策循环：executeAgentLoop()（ReAct 模式）
-│   ├── ai-client.ts             #    AI 客户端工厂：createAIClient()（纯 fetch）
-│   └── system-prompt.ts         #    系统提示词构建：buildSystemPrompt()
-│
-├── web/                         # 🌐 浏览器端 Agent（依赖 core）
-│   ├── index.ts                 #    WebAgent 类 — 浏览器端 AI Agent 入口
-│   └── tools/
-│       ├── register.ts          #    registerWebTools(registry) — 注册 5 个工具
-│       ├── dom-tool.ts          #    DOM 操作：click, fill, type, get_text, get_attr...
-│       ├── navigate-tool.ts     #    页面导航：goto, back, forward, reload, scroll
-│       ├── page-info-tool.ts    #    页面信息与 DOM 快照：url, title, snapshot...
-│       ├── wait-tool.ts         #    等待元素：waitForSelector（MutationObserver）
-│       ├── evaluate-tool.ts     #    JS 执行：在页面上下文中运行任意代码
-│       └── messaging.ts         #    Chrome Extension 消息桥（SW ↔ Content Script）
-│
-demo/                            # 🎨 Web Agent 演示
-├── index.html                   #    Chat UI（暗色主题 + 快捷测试按钮）
-├── main.ts                      #    WebAgent 实例 + UI 交互 + 回调绑定
-```
-
-两层结构：`core`（引擎，零环境依赖）+ `web`（浏览器工具 + DOM API），13 个源文件。
-
-### 设计原则
-
-| 层 | 目录 | 依赖 | 环境 |
-|----|------|------|------|
-| **core** | `src/core/` | 无（纯 TypeScript + fetch） | 任意（浏览器 / Worker） |
-| **web** | `src/web/` | core + DOM API | 浏览器 |
-
-- `web/` 只从 `core/` 导入，`core/` 不含任何 DOM/Node API
-- ToolRegistry 是实例化的（非全局 Map），每个 Agent 拥有独立的工具集
-- 全链路「容错不中断」— 单个工具失败不会中止 Agent 循环
-
----
-
-## AI Provider 支持
-
-| Provider | 端点 | 认证头 |
-|----------|------|--------|
-| `copilot` | `https://models.inference.ai.azure.com` | `Authorization: Bearer <GitHub PAT>` |
-| `openai` | `https://api.openai.com/v1` | `Authorization: Bearer <API Key>` |
-| `anthropic` | `https://api.anthropic.com` | `x-api-key: <API Key>` |
-
-所有 provider 均使用原生 `fetch` 调用，支持 `baseURL` 自定义端点（如代理服务器）。
-
-### 两层 API
-
-**高层 API** — 一步到位：
-
-```typescript
-import { createAIClient } from "autopilot/core/ai-client";
-
-const client = createAIClient({ provider: "copilot", model: "gpt-4o", apiKey: "ghp_xxx" });
-const response = await client.chat({ systemPrompt, messages, tools });
-```
-
-**底层 API** — 自定义 fetch 逻辑（自定义 headers、超时、重试、代理等）：
-
-```typescript
-import { buildChatRequest, parseChatResponse } from "autopilot/core/ai-client";
-
-const config = { provider: "copilot", model: "gpt-4o", apiKey: "ghp_xxx" };
-const req = buildChatRequest(config, { systemPrompt, messages, tools });
-
-// 自定义修改请求
-req.headers["X-Custom"] = "value";
-
-// 自行 fetch 并解析
-const { url, ...init } = req;
-const res = await fetch(url, init);
-const data = await res.json();
-const response = parseChatResponse(config.provider, data);
+├── core/
+│   ├── index.ts
+│   ├── types.ts
+│   ├── tool-params.ts
+│   ├── tool-registry.ts
+│   ├── system-prompt.ts
+│   ├── agent-loop/
+│   │   ├── index.ts
+│   │   ├── types.ts
+│   │   ├── constants.ts
+│   │   ├── helpers.ts
+│   │   ├── snapshot.ts
+│   │   ├── messages.ts
+│   │   └── recovery.ts
+│   └── ai-client/
+│       ├── index.ts
+│       ├── constants.ts
+│       ├── custom.ts
+│       ├── openai.ts
+│       ├── anthropic.ts
+│       ├── deepseek.ts
+│       └── sse.ts
+└── web/
+  ├── index.ts
+  ├── dom-tool.ts          # 兼容转发层（re-export）
+  ├── navigate-tool.ts     # 兼容转发层（re-export）
+  ├── page-info-tool.ts    # 兼容转发层（re-export）
+  ├── wait-tool.ts         # 兼容转发层（re-export）
+  ├── evaluate-tool.ts     # 兼容转发层（re-export）
+  ├── ref-store.ts
+  ├── messaging.ts
+  └── tools/
+    ├── dom-tool.ts
+    ├── navigate-tool.ts
+    ├── page-info-tool.ts
+    ├── wait-tool.ts
+    └── evaluate-tool.ts
 ```
 
 ---
 
-## 工具一览
+## 核心原理
 
-| 工具 | 动作 | 说明 |
-|------|------|------|
-| **dom** | `click`, `fill`, `type`, `get_text`, `get_attr`, `set_attr`, `add_class`, `remove_class` | DOM 操作（支持 ref 路径和 CSS 选择器） |
-| **navigate** | `goto`, `back`, `forward`, `reload`, `scroll` | 页面导航 |
-| **page_info** | `get_url`, `get_title`, `get_selection`, `get_viewport`, `snapshot`, `query_all` | 页面信息与 DOM 快照 |
-| **wait** | `wait_for_selector`, `wait_for_hidden`, `wait_for_text` | 等待元素变化（MutationObserver） |
-| **evaluate** | *expression* | 执行任意 JavaScript（`new Function`） |
+### 1) 快照驱动决策
 
-### DOM 快照与 Ref 路径
+AI 每一轮不是“凭记忆猜页面”，而是基于最新快照选择可执行动作。
 
-这是 AutoPilot 的核心设计 — 让 AI **精确定位** DOM 元素，无需猜测 CSS 选择器。
+快照包含：
+- 元素标签与关键信息
+- hash selector（如 `#a1b2c`）
+- 结构化层级关系
 
-`generateSnapshot()` 将 DOM 树转为 AI 可理解的文本描述，每个元素自动生成基于层级位置的 ref 路径：
+### 2) 任务增量消费
 
+用户任务会被分解成子任务，按轮次逐步“吃掉”：
+
+- 轮次 N：做当前快照可满足的动作
+- 工具执行后刷新快照
+- 轮次 N+1：继续做剩余子任务
+- 全部完成后返回总结文本
+
+新增（渐进式协议）：
+- 每轮都会显式携带 `Current remaining instruction`（当前剩余文本）
+- 每轮都会携带 `Previous round planned task array`（上一轮执行计划）
+- 模型可在文本中返回：
+  - `REMAINING: <剩余内容>`：表示还有任务要继续
+  - `REMAINING: DONE`：表示剩余任务已空
+
+### 3) 批量但不跨变更链式执行
+
+允许同轮批量执行多个“当前可见目标”的动作；
+不允许把“会导致新 DOM 出现”的后续动作强行塞进同轮。
+
+例子：
+- 可同轮：同时填写两个已可见输入框
+- 不可同轮：点击“打开弹窗”后立即填写弹窗字段（应等下一轮新快照）
+
+---
+
+## 完整架构流程图（含链路）
+
+### A. 端到端主流程
+
+```mermaid
+flowchart TD
+  U[用户输入任务] --> W[WebAgent.chat]
+  W --> P[构建 system prompt + 准备工具定义]
+  P --> L[executeAgentLoop]
+  L --> S[读取/刷新 latest snapshot]
+  S --> M[buildCompactMessages]
+  M --> C[AIClient.chat]
+  C --> D{是否返回 toolCalls}
+  D -->|是| X[ToolRegistry.dispatch 执行工具]
+  X --> T[写入 trace 与结果]
+  T --> S
+  D -->|否| F[输出最终总结并结束]
 ```
-[header] ref="/body/header"
-  [nav] ref="/body/header/nav"
-    [a] "首页" href="/" ref="/body/header/nav/a[1]"
-    [a] "关于" href="/about" ref="/body/header/nav/a[2]"
-[main] ref="/body/main"
-  [h1] "欢迎" ref="/body/main/h1"
-  [input] type="text" placeholder="搜索..." ref="/body/main/input"
-  [button] "搜索" id="search-btn" onclick ref="/body/main/button"
+
+### B. 分层模块关系
+
+```mermaid
+flowchart LR
+  subgraph Web[web 层]
+    WI[web/index.ts\nWebAgent]
+    WT[web tools]
+    RS[ref-store.ts]
+    MG[messaging.ts]
+  end
+
+  subgraph Core[core 层]
+    AL[agent-loop/*]
+    TR[tool-registry.ts]
+    SP[system-prompt.ts]
+    AI[ai-client/*]
+  end
+
+  WI --> AL
+  WI --> TR
+  WI --> SP
+  WI --> WT
+  WT --> RS
+  WI --> MG
+
+  AL --> AI
+  AL --> TR
 ```
 
-AI 使用 ref 路径调用 `dom` 工具，`resolveRef()` 在运行时将路径解析回 DOM 元素。采集的信息包括：id、class、交互属性、布尔状态、事件绑定、data-\* 属性、实时 value。
+### C. Agent Loop 轮次时序
 
-### 添加自定义工具
+```mermaid
+sequenceDiagram
+  participant User as User
+  participant Agent as WebAgent
+  participant Loop as AgentLoop
+  participant AI as AIClient
+  participant Tool as ToolRegistry
 
-```typescript
+  User->>Agent: chat(task)
+  Agent->>Loop: executeAgentLoop(...)
+  loop round 0..max
+    Loop->>Loop: read snapshot/context
+    Loop->>AI: compact messages + tools
+    AI-->>Loop: text/toolCalls
+    alt has toolCalls
+      Loop->>Tool: dispatch tool calls
+      Tool-->>Loop: results
+      Loop->>Loop: recovery + refresh snapshot
+    else final text
+      Loop-->>Agent: final reply
+    end
+  end
+```
+
+---
+
+## Agent Loop 细节
+
+主流程位于 `src/core/agent-loop/index.ts`：
+
+1. 确保当前快照可用
+2. 构建紧凑消息（原始目标 + done steps + 最新快照）
+3. 调用 AI
+4. 执行工具调用并记录 trace
+5. 运行保护机制
+6. 刷新快照并进入下一轮
+
+### 渐进式执行状态（新增）
+
+`src/core/agent-loop/index.ts` 内部维护 3 个关键状态：
+- `remainingInstruction`：当前轮次待消费文本（初始值为用户原始输入）
+- `previousRoundTasks`：上一轮执行任务数组
+- `lastPlannedBatchKey`：用于识别是否连续两轮给出完全相同的任务批次
+
+停机规则：
+- 若模型返回无工具调用 → 直接结束
+- 若连续两轮规划出相同任务批次，且上一轮无错误 → 自动终止，防止自转
+- 若模型文本包含 `REMAINING: DONE`，通常下一轮会自然进入“无工具调用总结”并结束
+
+### 紧凑消息结构
+
+由 `messages.ts` 构建，核心语义：
+- Master goal：用户原始任务（永远保留）
+- Done steps：已完成动作（避免重复）
+- Execution context + latest snapshot：当前可执行范围
+
+### 快照生命周期
+
+由 `snapshot.ts` 管理：
+- 读取快照
+- 包裹快照边界
+- 去重历史快照
+- 剥离旧 prompt 快照
+
+---
+
+## 保护机制
+
+由 `recovery.ts` 提供：
+
+- 冗余 `page_info` 拦截：减少无意义工具调用
+- 元素找不到恢复：自动等待并刷新快照
+- 导航 URL 变化检测：更新上下文，防止旧定位污染
+- 空转检测：避免循环无进展
+- 重复批次防自转：连续返回同一批任务时自动停止
+
+这些机制直接决定“调用次数、成功率、稳定性”。
+
+---
+
+## AI Client 设计
+
+`src/core/ai-client/` 提供统一接口，内部按 provider 适配：
+
+- `openai.ts`：OpenAI / Copilot 协议
+- `anthropic.ts`：Anthropic 协议
+- `deepseek.ts`：DeepSeek 协议
+- `sse.ts`：流式事件解析
+
+统一输出为 `AIChatResponse`，上层 loop 无需关心 provider 差异。
+
+---
+
+## Web 工具体系
+
+内置 5 个工具（`src/web/*.ts`）：
+
+1. `dom`：点击、填写、输入等交互
+2. `navigate`：跳转、前进后退、滚动
+3. `page_info`：URL/标题/快照/查询
+4. `wait`：等待元素或文本条件
+5. `evaluate`：执行页面上下文 JS
+
+通过 `ToolRegistry` 统一暴露给模型，执行结果标准化返回。
+
+---
+
+## 扩展与自定义
+
+### 注册自定义工具
+
+```ts
 import { Type } from "@sinclair/typebox";
 
 agent.registerTool({
   name: "my_tool",
-  description: "描述这个工具做什么",
+  description: "业务工具说明",
   schema: Type.Object({
-    param: Type.String({ description: "参数说明" }),
+    value: Type.String(),
   }),
   async execute(params) {
-    return { content: "执行结果" };
+    return { content: `ok: ${params.value}` };
   },
 });
 ```
 
----
+### Chrome Extension 模式
 
-## API
-
-### `WebAgent`
-
-```typescript
-new WebAgent(options: WebAgentOptions)
-```
-
-**配置选项：**
-
-| 选项 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `token` | `string` | 必填 | API Key（GitHub PAT / OpenAI key / Anthropic key） |
-| `provider` | `string` | `"copilot"` | AI 提供商：`"copilot"` \| `"openai"` \| `"anthropic"` |
-| `model` | `string` | `"gpt-4o"` | 模型名称 |
-| `baseURL` | `string` | — | 自定义 API 基础 URL |
-| `dryRun` | `boolean` | `false` | 干运行（只打印工具调用不执行） |
-| `systemPrompt` | `string` | — | 自定义系统提示词（不传则使用默认） |
-| `maxRounds` | `number` | `10` | 最大工具调用轮次 |
-| `memory` | `boolean` | `false` | 多轮对话记忆开关 |
-| `autoSnapshot` | `boolean` | `true` | 每次 chat 前自动生成 DOM 快照 |
-
-**方法：**
-
-| 方法 | 说明 |
-|------|------|
-| `registerTools()` | 注册 5 个内置 Web 工具 |
-| `registerTool(tool)` | 注册自定义工具 |
-| `getTools()` | 获取所有已注册工具定义 |
-| `chat(message)` | 发送消息，返回 `AgentLoopResult` |
-| `setToken(token)` | 更新 API Key |
-| `setProvider(provider)` | 更新 AI 提供商 |
-| `setModel(model)` | 更新模型 |
-| `setDryRun(enabled)` | 切换干运行模式 |
-| `setSystemPrompt(prompt)` | 设置自定义系统提示词 |
-| `setMemory(enabled)` | 开关多轮记忆（关闭时自动清空历史） |
-| `getMemory()` | 获取当前记忆开关状态 |
-| `setAutoSnapshot(enabled)` | 开关自动快照 |
-| `getAutoSnapshot()` | 获取当前自动快照开关 |
-| `clearHistory()` | 清空对话历史（不影响记忆开关） |
-
-**回调（`callbacks`）：**
-
-| 回调 | 触发时机 |
-|------|---------|
-| `onRound(round)` | 每轮循环开始（round 从 0 开始） |
-| `onText(text)` | AI 返回文本回复 |
-| `onToolCall(name, input)` | AI 请求调用工具（执行前） |
-| `onToolResult(name, result)` | 工具执行完成 |
-| `onSnapshot(snapshot)` | 自动快照生成完成 |
-
-### `AgentLoopResult`
-
-`chat()` 返回值：
-
-```typescript
-{
-  reply: string;                // AI 的最终文本回复
-  toolCalls: Array<{            // 所有工具调用记录
-    name: string;
-    input: unknown;
-    result: ToolCallResult;
-  }>;
-  messages: AIMessage[];        // 完整对话消息（用于多轮记忆累积）
-}
-```
+`web/messaging.ts` 提供消息桥：
+- Service Worker 发起工具调用
+- Content Script 执行 DOM 工具
+- 回传结果给后台 Agent
 
 ---
 
-## Chrome Extension 支持
+## 设计约束（必须遵守）
 
-AutoPilot 内置 Service Worker ↔ Content Script 消息桥，解决 Chrome Extension 的作用域隔离：
-
-```
-Service Worker (后台)                    Content Script (页面)
-┌──────────────────┐                    ┌──────────────────────┐
-│  AI Agent 核心    │  AUTOPILOT_TOOL_CALL │  DOM 操作执行         │
-│  createProxy     │  ────────────────►  │  registerToolHandler │
-│  Executor()      │                    │                      │
-│                  │  AUTOPILOT_TOOL_RESULT│                     │
-│                  │  ◄────────────────  │                      │
-└──────────────────┘                    └──────────────────────┘
-```
-
-```typescript
-// Service Worker 端
-import { createProxyExecutor } from "agentpage";
-const execute = createProxyExecutor();
-
-// Content Script 端
-import { registerToolHandler } from "agentpage";
-registerToolHandler(executorMap);
-```
+- `web` 只依赖 `core`，`core` 不依赖 DOM API
+- ToolRegistry 必须实例化，禁止全局单例污染
+- 工具失败应返回可消费结果，不应直接中断主循环
+- 消息策略与系统提示必须一致（否则会增加无效 completion）
 
 ---
 
-## 开发
+## 开发命令
 
 ```bash
-pnpm install          # 安装依赖
-pnpm build            # 构建产物（tsdown → dist/）
-pnpm check            # 类型检查（tsc --noEmit）+ lint（oxlint）
-pnpm lint             # 代码检查（oxlint）
-pnpm format           # 代码格式化（oxfmt --write）
-pnpm format:check     # 检查格式（oxfmt --check，不修改）
-pnpm demo             # 启动 Demo（Vite，端口 3000）
-pnpm test             # 运行测试（vitest run，单次执行）
-pnpm test:watch       # 运行测试（vitest watch 模式）
+pnpm install
+pnpm check
+pnpm test
+pnpm demo
+pnpm build
 ```
-
-### 工具链
-
-| 工具 | 用途 |
-|------|------|
-| **tsdown** | 构建打包（产出 `dist/`） |
-| **oxlint** | 代码检查（替代 ESLint） |
-| **oxfmt** | 代码格式化（替代 Prettier） |
-| **vitest** | 测试框架（覆盖率阈值 60%） |
-| **vite** | Demo 开发服务器 |
-| **TypeScript 5.9+** | 严格模式，`module: NodeNext` |
 
 ---
 
