@@ -80,23 +80,33 @@ export class OpenAIClient extends BaseAIClient {
   protected config: AIClientConfig;
 
   constructor(config: AIClientConfig) {
-    // 注入 chatHandler — 流式传输，减少首字节延迟，提升响应速度
+    // 注入 chatHandler — 根据 config.stream 选择流式或 JSON（默认流式）
     super({
       chatHandler: async (params: ChatHandlerParams): Promise<AIChatResponse> => {
         const req = buildOpenAIRequest(this.config, params);
+        const useStream = this.config.stream ?? true;
 
-        // 先尝试流式传输（低延迟），失败时自动降级到非流式
-        const body = JSON.parse(req.body) as Record<string, unknown>;
-        const streamBody: Record<string, unknown> = {
-          ...body,
-          stream: true,
-          stream_options: { include_usage: true },
-        };
+        if (!useStream) {
+          const res = await fetch(req.url, {
+            method: req.method,
+            headers: req.headers,
+            body: req.body,
+          });
 
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`AI API ${res.status}: ${errText.slice(0, 500)}`);
+          }
+
+          const data = await res.json();
+          return parseOpenAIResponse(data);
+        }
+
+        // 流式模式：请求体已在 buildOpenAIRequest 中包含 stream 字段
         const streamRes = await fetch(req.url, {
           method: req.method,
           headers: req.headers,
-          body: JSON.stringify(streamBody),
+          body: req.body,
         });
 
         if (!streamRes.ok) {
@@ -110,27 +120,7 @@ export class OpenAIClient extends BaseAIClient {
           return parseOpenAIResponse(data);
         }
 
-        try {
-          const parsed = await parseOpenAIStream(streamRes, 20000);
-          if (parsed.text || (parsed.toolCalls && parsed.toolCalls.length > 0)) {
-            return parsed;
-          }
-          throw new Error("Empty SSE response");
-        } catch {
-          const fallbackRes = await fetch(req.url, {
-            method: req.method,
-            headers: req.headers,
-            body: JSON.stringify(body),
-          });
-
-          if (!fallbackRes.ok) {
-            const errText = await fallbackRes.text();
-            throw new Error(`AI API ${fallbackRes.status}: ${errText.slice(0, 500)}`);
-          }
-
-          const data = await fallbackRes.json();
-          return parseOpenAIResponse(data);
-        }
+        return parseOpenAIStream(streamRes, 20000);
       },
     });
     this.config = config;
@@ -177,6 +167,11 @@ export function buildOpenAIRequest(
     temperature: 0.3,
     max_tokens: 4096,
   };
+
+  if (config.stream ?? true) {
+    body.stream = true;
+    body.stream_options = { include_usage: true };
+  }
 
   if (openaiTools && openaiTools.length > 0) {
     body.tools = openaiTools;

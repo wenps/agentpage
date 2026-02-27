@@ -303,9 +303,31 @@ export function buildCompactMessages(
   // ─── 当前页面状态 + 快照，作为 user 消息 ───
   // 检查是否所有步骤都已成功（无失败）— 提示 AI 可以停止
   const hasErrors = trace.some(e => hasToolError(e.result));
-  const contextParts: string[] = hasErrors
-    ? ["Continue. Batch all tool calls whose targets are in the snapshot. Do not repeat ✅ steps."]
-    : ["If the user's task is fully done, reply with a short summary (no tool calls). Otherwise continue with remaining steps."];
+  const contextParts: string[] = [
+    "## Execution context",
+    "Master goal (full original user request):",
+    userMessage,
+    "",
+    "Already completed steps are listed above as `Done steps (do NOT repeat)`.",
+    "Now infer remaining tasks from the master goal and execute as many independent ones as possible in this round.",
+    "Execution policy:",
+    "- Prefer batching multiple tool calls in one response.",
+    "- Same-page dependent actions can be chained in one round (open -> fill -> submit).",
+    "- Avoid redundant inspection. If latest snapshot already contains required targets, execute directly.",
+    "- Do not call `page_info.snapshot` repeatedly unless page changed or target certainty is truly insufficient.",
+    "- Workflow is: read latest snapshot -> execute a batch of tools -> read refreshed snapshot -> continue.",
+    "",
+  ];
+
+  if (hasErrors) {
+    contextParts.push(
+      "Continue from failures only. Batch all tool calls whose targets are already visible in the snapshot. Do not repeat ✅ steps.",
+    );
+  } else {
+    contextParts.push(
+      "If the goal is fully done, reply with a short summary (no tool calls). Otherwise continue with only the remaining steps.",
+    );
+  }
 
   // 最近失败操作详情
   const lastEntry = trace[trace.length - 1];
@@ -322,7 +344,12 @@ export function buildCompactMessages(
   }
 
   if (latestSnapshot) {
-    contextParts.push("", "## Current DOM snapshot", wrapSnapshot(latestSnapshot));
+    contextParts.push(
+      "",
+      "## Latest DOM snapshot (after previous tool batch)",
+      "Use this snapshot as the authoritative state for planning the next batch.",
+      wrapSnapshot(latestSnapshot),
+    );
   }
 
   messages.push({ role: "user", content: contextParts.join("\n") });

@@ -18,6 +18,7 @@ const inputEl = document.getElementById("input") as HTMLInputElement;
 const sendBtn = document.getElementById("send") as HTMLButtonElement;
 const tokenEl = document.getElementById("token") as HTMLInputElement;
 const modelEl = document.getElementById("model") as HTMLSelectElement;
+const streamModeEl = document.getElementById("streamMode") as HTMLSelectElement;
 
 // ─── 底部聊天面板折叠/展开 ───
 const chatDockToggle = document.getElementById("chatDockToggle")!;
@@ -111,6 +112,7 @@ const agent = new WebAgent({
   provider: "deepseek",
   model: "deepseek-chat",
   baseURL: "/api",
+  stream: true,
 });
 agent.registerTools(); // 注册内置 Web 工具
 
@@ -242,6 +244,7 @@ async function handleSend() {
   // 同步 UI 设置到 Agent 实例
   agent.setToken(token);
   agent.setModel(modelEl.value);
+  agent.setStream(streamModeEl.value === "stream");
   agent.setDryRun(dryrunEl.checked);
 
   try {

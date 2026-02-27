@@ -56,6 +56,8 @@ export type AIClientConfig = {
   apiKey: string;
   /** 自定义 API 基础 URL（可选，如本地 Ollama: http://localhost:11434/v1） */
   baseURL?: string;
+  /** 是否启用流式输出（SSE）。默认 true；传 false 时使用 JSON 非流式响应。 */
+  stream?: boolean;
 };
 
 /** chat 方法的统一入参 */

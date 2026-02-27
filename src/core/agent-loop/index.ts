@@ -122,6 +122,7 @@ export async function executeAgentLoop(
   const actionRecoveryAttempts = new Map<string, number>();
   const pageContext: PageContextState = {};
   let finalReply = "";
+  let consecutiveSnapshotCalls = 0;
   /** 连续"纯信息查询"轮次计数 — 检测 AI 空转 */
   let consecutiveReadOnlyRounds = 0;
   /** 纯信息查询工具（不改变页面状态） */
@@ -129,6 +130,11 @@ export async function executeAgentLoop(
 
   for (let round = 0; round < maxRounds; round++) {
     callbacks?.onRound?.(round);
+
+    // 进入本轮前，确保有一份可用快照（由 Agent 主动维护）
+    if (!pageContext.latestSnapshot) {
+      pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
+    }
 
     // ─── 构建紧凑消息：每轮从 trace 重建，而非累积 message 对 ───
     const effectivePrompt = pageContext.latestSnapshot
@@ -156,8 +162,10 @@ export async function executeAgentLoop(
       break;
     }
 
-    // 有文本伴随工具调用 → 先通知
-    if (response.text) callbacks?.onText?.(response.text);
+    // 工具调用轮次不展示长篇规划文本，避免“先规划再执行”的冗余体验
+    if (response.text && response.toolCalls.length === 0) {
+      callbacks?.onText?.(response.text);
+    }
 
     // ─── Dry-run 模式 ───
     if (dryRun) {
@@ -193,10 +201,52 @@ export async function executeAgentLoop(
 
     // 批量执行所有工具调用 — 不在中间插入额外检查
     for (const tc of response.toolCalls) {
+      // 首轮或已有最新快照时，跳过冗余 page_info(snapshot)
+      if (
+        tc.name === "page_info" &&
+        getToolAction(tc.input) === "snapshot" &&
+        pageContext.latestSnapshot
+      ) {
+        const skipped: ToolCallResult = {
+          content:
+            "Skip redundant snapshot: latest snapshot is already available for planning. Execute actionable tools directly.",
+          details: {
+            error: true,
+            code: "REDUNDANT_SNAPSHOT_SKIPPED",
+            round,
+          },
+        };
+
+        allToolCalls.push({ name: tc.name, input: tc.input, result: skipped });
+        fullToolTrace.push({ round, name: tc.name, input: tc.input, result: skipped });
+        callbacks?.onToolResult?.(tc.name, skipped);
+        continue;
+      }
+
       callbacks?.onToolCall?.(tc.name, tc.input);
 
       // 执行工具
       let result = await registry.dispatch(tc.name, tc.input);
+
+      // 连续快照防抖：同页下反复 snapshot 时提示直接执行剩余动作
+      if (tc.name === "page_info" && getToolAction(tc.input) === "snapshot") {
+        consecutiveSnapshotCalls++;
+        if (consecutiveSnapshotCalls >= 2) {
+          result = {
+            content: [
+              toContentString(result.content),
+              "Redundant snapshot detected. Continue with remaining actionable steps using the latest snapshot; avoid additional snapshot unless navigation or uncertainty changes.",
+            ].join("\n"),
+            details: {
+              error: true,
+              code: "REDUNDANT_SNAPSHOT",
+              consecutiveSnapshotCalls,
+            },
+          };
+        }
+      } else {
+        consecutiveSnapshotCalls = 0;
+      }
 
       // 元素未找到 → 自动恢复（刷新快照）
       if (tc.name === "dom" && isElementNotFoundResult(result)) {
@@ -278,6 +328,9 @@ export async function executeAgentLoop(
     } else {
       consecutiveReadOnlyRounds = 0;
     }
+
+    // 一轮工具批量执行完成后，统一刷新一次快照，供下一轮直接使用
+    pageContext.latestSnapshot = await readPageSnapshot(registry, 6);
 
     // 下一轮从 trace 重建紧凑消息，无需累积
   }

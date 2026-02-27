@@ -77,6 +77,8 @@ export type WebAgentOptions = {
   model?: string;
   /** 自定义 API 基础 URL（可选，覆盖 provider 默认值） */
   baseURL?: string;
+  /** 是否启用流式输出（SSE）。默认 true；false 时使用 JSON 非流式响应。 */
+  stream?: boolean;
   /** 是否启用干运行模式 */
   dryRun?: boolean;
   /** 自定义系统提示词（不传则使用默认 Web 提示词） */
@@ -100,6 +102,7 @@ export class WebAgent {
   private provider: string;
   private model: string;
   private baseURL?: string;
+  private stream: boolean;
   private dryRun: boolean;
   private maxRounds: number;
   private customSystemPrompt?: string;
@@ -125,6 +128,7 @@ export class WebAgent {
     this.provider = options.provider ?? "copilot";
     this.model = options.model ?? "gpt-4o";
     this.baseURL = options.baseURL;
+    this.stream = options.stream ?? true;
     this.dryRun = options.dryRun ?? false;
     this.maxRounds = options.maxRounds ?? 10;
     this.customSystemPrompt = options.systemPrompt;
@@ -179,6 +183,16 @@ export class WebAgent {
   /** 设置模型 */
   setModel(model: string): void {
     this.model = model;
+  }
+
+  /** 设置是否启用流式输出（SSE） */
+  setStream(enabled: boolean): void {
+    this.stream = enabled;
+  }
+
+  /** 获取当前流式输出开关状态 */
+  getStream(): boolean {
+    return this.stream;
   }
 
   /** 切换干运行模式 */
@@ -325,6 +339,7 @@ export class WebAgent {
       model: this.model,
       apiKey: this.token,
       baseURL: this.baseURL,
+      stream: this.stream,
     });
   }
 }
