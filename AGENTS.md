@@ -130,6 +130,7 @@ src/
 补充（当前实现）：
 - chat 发起时由前端先生成首轮快照并注入 `initialSnapshot`。
 - 默认拦截 `page_info.*`，避免模型把“看页面”当主流程。
+- `pruneLayout=true` 折叠布局容器时，若同一折叠链路提升出多个相邻子节点，快照会输出括号分组块（`collapsed-group`）保留关联语义。
 
 ### 4.4 找不到元素重试对话流（新增）
 
@@ -148,6 +149,7 @@ src/
 - `dom.fill`：限制不适用于 `checkbox/radio/file/button/submit/reset`，避免错误动作。
 - `wait.wait_for_selector`：支持 `state=attached|visible|hidden|detached`（默认 `attached`）。
 - 快照增强运行态：`select val`、`option selected`、`checked`、`disabled`、`readonly` 可见。
+- 快照增强结构语义：布局折叠后可通过括号分组块（`collapsed-group`）看出被提升节点之间的来源关联。
 
 ## 5. 模块职责细化
 

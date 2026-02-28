@@ -4,10 +4,13 @@
  * 替代 Playwright 的 click/fill/type 等操作，直接在页面上下文中执行。
  * 运行环境：浏览器 Content Script。
  *
- * 支持 12 种动作：
+ * 支持 15 种动作：
  *   click        — 点击元素
  *   fill         — 填写可编辑控件（input/textarea/select/contenteditable）
  *   select_option — 选择下拉框选项（value/label）
+ *   clear        — 清空输入控件
+ *   check        — 勾选 checkbox/radio
+ *   uncheck      — 取消勾选 checkbox
  *   type         — 逐字符模拟键入
  *   focus        — 聚焦元素
  *   hover        — 鼠标悬停（触发 mouseenter/mouseover）
@@ -113,8 +116,47 @@ function resolveWaitMs(params: Record<string, unknown>): number {
  * 模拟真实用户输入：触发 input、change 事件，兼容 React/Vue 等框架。
  */
 function dispatchInputEvents(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): void {
-  el.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+  try {
+    el.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertText",
+      data: null,
+    }));
+  } catch {
+    el.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+  }
   el.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+}
+
+/**
+ * 使用原生 setter 写入表单值，提升对受控组件（React/Vue 等）的兼容性。
+ */
+function setNativeEditableValue(
+  el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  value: string,
+): void {
+  const proto =
+    el instanceof HTMLInputElement
+      ? HTMLInputElement.prototype
+      : el instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLSelectElement.prototype;
+  const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+  if (descriptor?.set) {
+    descriptor.set.call(el, value);
+    return;
+  }
+  el.value = value;
+}
+
+/**
+ * 读取可编辑元素当前值。
+ */
+function getEditableValue(
+  el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+): string {
+  return el.value ?? "";
 }
 
 /**
@@ -167,29 +209,186 @@ function describeElement(el: Element): string {
   return `<${tag}${id}${cls}>${textHint}${attrHint}`;
 }
 
+function isElementVisible(el: Element): boolean {
+  if (!(el instanceof HTMLElement || el instanceof SVGElement)) return false;
+  if (!el.isConnected) return false;
+  const style = window.getComputedStyle(el);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  if (style.opacity === "0") return false;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function isElementDisabled(el: Element): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.hasAttribute("disabled")) return true;
+  if (el.getAttribute("aria-disabled") === "true") return true;
+  if ("disabled" in el && typeof (el as { disabled?: unknown }).disabled === "boolean") {
+    return Boolean((el as { disabled?: boolean }).disabled);
+  }
+  return false;
+}
+
+function isEditableElement(el: Element): boolean {
+  if (el instanceof HTMLTextAreaElement) return !el.readOnly;
+  if (el instanceof HTMLInputElement) {
+    const blockedTypes = new Set(["checkbox", "radio", "file", "button", "submit", "reset"]);
+    return !blockedTypes.has(el.type) && !el.readOnly;
+  }
+  if (el instanceof HTMLSelectElement) return true;
+  return el instanceof HTMLElement && el.isContentEditable;
+}
+
+function isCheckableInput(el: Element | null): el is HTMLInputElement {
+  return el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio");
+}
+
+function findCheckableIn(el: ParentNode | null): HTMLInputElement | null {
+  if (!el) return null;
+  const found = el.querySelector('input[type="checkbox"], input[type="radio"]');
+  return isCheckableInput(found) ? found : null;
+}
+
+/**
+ * 归一化 check/uncheck 目标：
+ * 允许模型命中文本容器/label/div，再回溯到关联 checkbox/radio，
+ * 以降低快照剪枝导致的“命中语义节点而非真实控件”失败率。
+ */
+function resolveCheckableTarget(el: Element): HTMLInputElement | null {
+  if (isCheckableInput(el)) return el;
+
+  if (el instanceof HTMLLabelElement) {
+    const byLabel = findCheckableIn(el);
+    if (byLabel) return byLabel;
+    const htmlFor = el.htmlFor?.trim();
+    if (htmlFor) {
+      const byFor = document.getElementById(htmlFor);
+      if (isCheckableInput(byFor)) return byFor;
+    }
+  }
+
+  if (el instanceof HTMLElement) {
+    const ownerLabel = el.closest("label");
+    if (ownerLabel) {
+      const byOwnerLabel = findCheckableIn(ownerLabel);
+      if (byOwnerLabel) return byOwnerLabel;
+
+      const htmlFor = ownerLabel.htmlFor?.trim();
+      if (htmlFor) {
+        const byFor = document.getElementById(htmlFor);
+        if (isCheckableInput(byFor)) return byFor;
+      }
+    }
+
+    const inSelf = findCheckableIn(el);
+    if (inSelf) return inSelf;
+
+    const prev = el.previousElementSibling;
+    if (isCheckableInput(prev)) return prev;
+    const next = el.nextElementSibling;
+    if (isCheckableInput(next)) return next;
+
+    const parent = el.parentElement;
+    const inParent = findCheckableIn(parent);
+    if (inParent) return inParent;
+  }
+
+  return null;
+}
+
+function ensureActionable(
+  el: Element,
+  action: string,
+  selector: string,
+): ToolCallResult | null {
+  if (!el.isConnected) {
+    return {
+      content: `"${selector}" 元素已脱离文档，无法执行 ${action}`,
+      details: { error: true, code: "ELEMENT_DETACHED", action, selector },
+    };
+  }
+
+  const readOnlyActions = new Set(["get_text", "get_attr"]);
+  if (!readOnlyActions.has(action) && !isElementVisible(el)) {
+    return {
+      content: `"${selector}" 元素不可见，无法执行 ${action}`,
+      details: { error: true, code: "ELEMENT_NOT_VISIBLE", action, selector },
+    };
+  }
+
+  const mutationActions = new Set([
+    "click", "fill", "type", "press", "select_option", "clear", "check", "uncheck",
+  ]);
+  if (mutationActions.has(action) && isElementDisabled(el)) {
+    return {
+      content: `"${selector}" 元素已禁用，无法执行 ${action}`,
+      details: { error: true, code: "ELEMENT_DISABLED", action, selector },
+    };
+  }
+
+  if (["fill", "type", "clear"].includes(action) && !isEditableElement(el)) {
+    return {
+      content: `"${selector}" 不是可编辑元素，无法执行 ${action}`,
+      details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector },
+    };
+  }
+
+  return null;
+}
+
+function isOptionCandidateVisible(el: Element): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (!isElementVisible(el)) return false;
+  const text = el.textContent?.trim() ?? "";
+  return text.length > 0;
+}
+
+function findVisibleOptionByText(text: string): HTMLElement | null {
+  const target = text.trim().toLowerCase();
+  if (!target) return null;
+  const nodes = Array.from(document.querySelectorAll(
+    '[role="option"], .bk-select-option, .bk-option, [data-option], li, option',
+  ));
+
+  for (const node of nodes) {
+    if (!isOptionCandidateVisible(node)) continue;
+    const content = node.textContent?.trim().toLowerCase() ?? "";
+    if (content === target) return node as HTMLElement;
+  }
+  for (const node of nodes) {
+    if (!isOptionCandidateVisible(node)) continue;
+    const content = node.textContent?.trim().toLowerCase() ?? "";
+    if (content.includes(target)) return node as HTMLElement;
+  }
+  return null;
+}
+
 export function createDomTool(): ToolDefinition {
   return {
     name: "dom",
     description: [
       "Perform DOM operations on the current page.",
-      "Actions: click, fill, select_option, type, focus, hover, press, get_text, get_attr, set_attr, add_class, remove_class.",
+      "Actions: click, fill, select_option, clear, check, uncheck, type, focus, hover, press, get_text, get_attr, set_attr, add_class, remove_class.",
+      "Input/Select rule: before each fill/type/select_option, click or focus the same target immediately in the same round.",
+      "For multiple fields, use alternating pairs in one batch: focus/click A -> fill/type A -> focus/click B -> fill/type B.",
+      "Do not send focus-only batches for editable fields.",
       "Use the hash ID from DOM snapshot (e.g. #a1b2c) as selector.",
     ].join(" "),
 
     schema: Type.Object({
       action: Type.String({
         description:
-          "DOM action: click | fill | select_option | type | focus | hover | press | get_text | get_attr | set_attr | add_class | remove_class",
+          "DOM action: click | fill | select_option | clear | check | uncheck | type | focus | hover | press | get_text | get_attr | set_attr | add_class | remove_class. For fill/type/select_option, perform click/focus on same target immediately before it.",
       }),
       selector: Type.String({ description: "Element ref ID from snapshot (e.g. #r0, #r5) or CSS selector" }),
       value: Type.Optional(
-        Type.String({ description: "Value for fill/type/set_attr actions" }),
+        Type.String({ description: "Value for fill/type/set_attr actions. For fill/type, run after click/focus on same target in the same round." }),
       ),
       key: Type.Optional(
         Type.String({ description: "Key name for press action (e.g. Enter, Escape, Tab, ArrowDown, ArrowUp, Backspace, Delete, Space)" }),
       ),
       label: Type.Optional(
-        Type.String({ description: "Label text for select_option action (fallback when value is not provided)" }),
+        Type.String({ description: "Label text for select_option action (fallback when value is not provided). Run select_option after click/focus on same target in the same round." }),
       ),
       index: Type.Optional(
         Type.Number({ description: "0-based option index for select_option action" }),
@@ -212,12 +411,16 @@ export function createDomTool(): ToolDefinition {
             "Optional wait timeout in seconds before action. Used when waitMs is not provided.",
         }),
       ),
+      force: Type.Optional(
+        Type.Boolean({ description: "Skip actionability checks for interaction actions (default false)." }),
+      ),
     }),
 
     execute: async (params): Promise<ToolCallResult> => {
       const action = params.action as string;
       const selector = params.selector as string;
       const waitMs = resolveWaitMs(params);
+      const force = params.force === true;
 
       if (!selector) return { content: "缺少 selector 参数" };
 
@@ -260,7 +463,19 @@ export function createDomTool(): ToolDefinition {
         el = elOrError;
       }
 
+      if (action === "check" || action === "uncheck") {
+        const resolvedCheckable = resolveCheckableTarget(el);
+        if (resolvedCheckable) {
+          el = resolvedCheckable;
+        }
+      }
+
       try {
+        if (!force) {
+          const checkResult = ensureActionable(el, action, selector);
+          if (checkResult) return checkResult;
+        }
+
         switch (action) {
           // ─── 交互类 ───
 
@@ -321,9 +536,16 @@ export function createDomTool(): ToolDefinition {
               bubbles: true,
               cancelable: true,
             };
-            el.dispatchEvent(new KeyboardEvent("keydown", eventInit));
+            const keydownAllowed = el.dispatchEvent(new KeyboardEvent("keydown", eventInit));
             el.dispatchEvent(new KeyboardEvent("keypress", eventInit));
             el.dispatchEvent(new KeyboardEvent("keyup", eventInit));
+
+            if (keydownAllowed && key === "Enter") {
+              if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+                const form = el.form ?? el.closest("form");
+                form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+              }
+            }
             return { content: `已在 ${describeElement(el)} 上按下 ${key}` };
           }
 
@@ -343,8 +565,23 @@ export function createDomTool(): ToolDefinition {
                 }
               }
               el.focus();
-              el.value = value;
+              setNativeEditableValue(el, value);
               dispatchInputEvents(el);
+
+              const actualValue = getEditableValue(el);
+              if (actualValue !== value) {
+                return {
+                  content: `"${selector}" 填写后值不一致：期望 "${value}"，实际 "${actualValue}"`,
+                  details: {
+                    error: true,
+                    code: "FILL_NOT_APPLIED",
+                    action,
+                    selector,
+                    expected: value,
+                    actual: actualValue,
+                  },
+                };
+              }
             } else if (el instanceof HTMLSelectElement) {
               el.focus();
 
@@ -375,6 +612,21 @@ export function createDomTool(): ToolDefinition {
               }
 
               dispatchInputEvents(el);
+
+              const actualValue = getEditableValue(el);
+              if (actualValue !== el.value) {
+                return {
+                  content: `"${selector}" 下拉框状态异常，未确认写入`,
+                  details: {
+                    error: true,
+                    code: "FILL_NOT_APPLIED",
+                    action,
+                    selector,
+                    expected: value,
+                    actual: actualValue,
+                  },
+                };
+              }
             } else if (el instanceof HTMLElement && el.isContentEditable) {
               el.focus();
               el.textContent = value;
@@ -395,7 +647,31 @@ export function createDomTool(): ToolDefinition {
             }
 
             if (!(el instanceof HTMLSelectElement)) {
-              return { content: `"${selector}" 不是下拉框元素` };
+              if (!(el instanceof HTMLElement)) {
+                return { content: `"${selector}" 不是下拉框元素` };
+              }
+
+              el.focus();
+              el.click();
+              const wanted = (label ?? value ?? "").trim();
+              if (!wanted) {
+                return { content: `"${selector}" 为自定义下拉时，需提供 value 或 label` };
+              }
+              const option = findVisibleOptionByText(wanted);
+              if (!option) {
+                return {
+                  content: `未找到与 "${wanted}" 匹配的可见下拉选项（自定义下拉）`,
+                  details: {
+                    error: true,
+                    code: "OPTION_NOT_FOUND",
+                    action,
+                    selector,
+                    wanted,
+                  },
+                };
+              }
+              option.click();
+              return { content: `已在自定义下拉中选择 "${wanted}"` };
             }
 
             el.focus();
@@ -445,6 +721,46 @@ export function createDomTool(): ToolDefinition {
             return {
               content: `已选择 ${describeElement(el)}: value="${selectedOption.value}", label="${selectedOption.text.trim()}"`,
             };
+          }
+
+          case "clear": {
+            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+              el.focus();
+              setNativeEditableValue(el, "");
+              dispatchInputEvents(el);
+              return { content: `已清空 ${describeElement(el)}` };
+            }
+            if (el instanceof HTMLElement && el.isContentEditable) {
+              el.focus();
+              el.textContent = "";
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              return { content: `已清空 ${describeElement(el)}` };
+            }
+            return { content: `"${selector}" 不是可清空元素` };
+          }
+
+          case "check": {
+            if (!(el instanceof HTMLInputElement) || (el.type !== "checkbox" && el.type !== "radio")) {
+              return { content: `"${selector}" 不是 checkbox/radio` };
+            }
+            el.focus();
+            if (!el.checked) {
+              el.checked = true;
+              dispatchInputEvents(el);
+            }
+            return { content: `已勾选 ${describeElement(el)}` };
+          }
+
+          case "uncheck": {
+            if (!(el instanceof HTMLInputElement) || el.type !== "checkbox") {
+              return { content: `"${selector}" 不是 checkbox` };
+            }
+            el.focus();
+            if (el.checked) {
+              el.checked = false;
+              dispatchInputEvents(el);
+            }
+            return { content: `已取消勾选 ${describeElement(el)}` };
           }
 
           case "type": {

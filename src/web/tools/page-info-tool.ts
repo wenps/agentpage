@@ -282,7 +282,9 @@ export function generateSnapshot(
     directText = directText.trim();
 
     // ─── 智能剪枝 ───
-    // 无意义布局容器：不输出自身行，直接将子元素提升到当前层级
+    // 无意义布局容器：默认不输出自身行，直接将子元素提升到当前层级。
+    // 若提升后同层出现多个孩子（如 a 与 b(c) 折叠成 a 与 c），
+    // 则输出括号分组块，显式保留这些节点的关联来源。
     if (isEmptyLayoutContainer(el, directText)) {
       const allChildren = Array.from(el.children);
       const interactiveChildren = allChildren.filter(isInteractiveElement);
@@ -291,19 +293,36 @@ export function generateSnapshot(
       const selectedChildren = orderedChildren.slice(0, maxChildren);
       const omittedChildren = orderedChildren.length - selectedChildren.length;
 
-      const childLines: string[] = [];
+      const childBlocks: string[] = [];
       for (let i = 0; i < selectedChildren.length; i++) {
         // 子元素继承当前路径（保证 hash 计算正确），但不增加缩进
         const childResult = walk(selectedChildren[i], depth, currentPath);
-        if (childResult) childLines.push(childResult);
-      }
-
-      if (omittedChildren > 0) {
-        childLines.push(`${"  ".repeat(depth)}... (${omittedChildren} children omitted)`);
+        if (childResult) childBlocks.push(childResult);
       }
 
       // 如果子树也全部为空，整个容器就被剪掉
-      return childLines.join("\n");
+      if (childBlocks.length === 0 && omittedChildren <= 0) {
+        return "";
+      }
+
+      const shouldGroupCollapsedChildren = childBlocks.length >= 2 || omittedChildren > 0;
+      if (!shouldGroupCollapsedChildren) {
+        return childBlocks.join("\n");
+      }
+
+      const groupLines: string[] = [
+        `${"  ".repeat(depth)}([${tag}] collapsed-group`,
+      ];
+      for (const block of childBlocks) {
+        groupLines.push(indentMultiline(block, 1));
+      }
+
+      if (omittedChildren > 0) {
+        groupLines.push(`${"  ".repeat(depth + 1)}... (${omittedChildren} children omitted)`);
+      }
+
+      groupLines.push(`${"  ".repeat(depth)})`);
+      return groupLines.join("\n");
     }
 
     // 构建当前元素描述：[标签] "文本" 属性 #ID
@@ -378,6 +397,17 @@ function queryAllElements(selector: string, limit = 20): string {
   } catch {
     return `选择器语法错误: ${selector}`;
   }
+}
+
+/**
+ * 多行文本块缩进（中）/ Indent each line of a multiline block (EN).
+ */
+function indentMultiline(block: string, indentLevel: number): string {
+  const prefix = "  ".repeat(indentLevel);
+  return block
+    .split("\n")
+    .map(line => `${prefix}${line}`)
+    .join("\n");
 }
 
 export function createPageInfoTool(): ToolDefinition {

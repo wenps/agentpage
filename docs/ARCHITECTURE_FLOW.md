@@ -277,7 +277,7 @@ flowchart TD
 | 优化 | 说明 | 默认值 |
 |------|------|--------|
 | **视口裁剪** | 只保留屏幕内可见元素 | `viewportOnly: true` |
-| **智能剪枝** | 折叠无意义的纯布局 div/span | `pruneLayout: true` |
+| **智能剪枝** | 折叠无意义的纯布局 div/span；若同一折叠链路提升出多个相邻子节点，会输出括号分组块（`collapsed-group`）保留关联 | `pruneLayout: true` |
 | **节点上限** | 超过后停止遍历 | `maxNodes: 220` |
 | **子元素上限** | 每个父元素最多输出 N 个子元素 | `maxChildren: 25` |
 | **文本截断** | 文本内容超长时截断 | `maxTextLength: 40` |
@@ -761,7 +761,7 @@ or uncertainty changes.
 | `maxChildren` | `25` | `page-info-tool.ts` | 每个父节点最多子元素数 |
 | `maxTextLength` | `40` | `page-info-tool.ts` | 每个节点文本截断长度 |
 | `viewportOnly` | `true` | `page-info-tool.ts` | 只快照视口内元素 |
-| `pruneLayout` | `true` | `page-info-tool.ts` | 智能剪枝空布局容器 |
+| `pruneLayout` | `true` | `page-info-tool.ts` | 智能剪枝空布局容器；多子节点提升时输出 `collapsed-group` 保留关联 |
 | `temperature` | `0.3` | `openai.ts` | OpenAI 模型温度 |
 | `max_tokens` | `4096` / `8192~16384` | 各客户端 | 最大输出 token |
 | `stream` | `true` | `ai-client/index.ts` | 是否启用 SSE 流式 |

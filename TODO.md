@@ -5,6 +5,13 @@
 - [x] **快照：视口裁剪** — 用 `getBoundingClientRect()` 判断元素是否在视口内，跳过不可见区域，大幅减少 token 消耗（配置项 `viewportOnly`）
 - [x] **快照：智能剪枝** — 对无交互属性、无文本的纯布局 `div` 做折叠/省略，只保留交互元素和有意义文本（配置项 `pruneLayout`）
 - [ ] **快照：Token 预算控制** — 增加 `maxTokenEstimate` 参数，达到预算后停止遍历，输出 `(更多元素已省略...)`
+- [ ] **Loop：减少无效对话轮次（高优先）** — 解决“请求和 AI 对话过多导致慢”的核心问题
+	- [ ] 增加 `maxNoProgressRounds`（默认 1~2），连续无推进立即收敛，不再继续请求
+	- [ ] 强化“协议修复回合”上限：出现 `remaining 未完成 + 无工具调用` 不超过 1 次修复轮
+	- [ ] 对只读动作（`page_info/query`）设置每轮预算，超预算直接返回可执行约束提示
+	- [ ] 增加“重复计划批次 + 低信息增量”终止条件（不仅比较 toolCalls，也比较 remaining 变化）
+	- [ ] 新增轮次级指标：`avgRoundLatency`、`noProgressRoundCount`、`protocolRepairCount`
+	- [ ] 验收：典型任务平均轮次下降 30%+，P95 总耗时下降 25%+
 - [ ] **DOM：Shadow DOM 穿透** — 遍历时检测 `el.shadowRoot`，进入 shadow tree，ref 路径标记 `/#shadow`；同步更新 `resolveRef()` 解析逻辑
 - [ ] **等待：网络空闲检测** — Hook `fetch` / `XMLHttpRequest`，追踪 pending 请求数，新增 `wait_for_network_idle` action
 
@@ -16,6 +23,8 @@
 - [ ] **B端：表单 label-input 关联** — 识别 `<form>` 边界，将 label-input 对自动关联，让 AI 理解「姓名字段」而非「第3个input」
 - [ ] **等待：DOM 稳定等待** — 执行 DOM 操作前等待 DOM 在一段时间内无变化（debounced MutationObserver）
 - [ ] **等待：加载态检测** — 检测常见 loading 指示器（`.ant-spin`、`[aria-busy=true]`、skeleton），自动等待消失
+- [ ] **消息：上下文窗口化压缩** — 在 memory 开启时只保留最近 N 轮关键摘要（任务、结果、remaining），避免历史对话线性增长
+- [ ] **快照：差量注入（delta）** — 优先注入“本轮变化”而非整页重复快照，减少重复 token 与模型冗余推理
 
 ## P2 — 中期做（建立壁垒）
 

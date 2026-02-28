@@ -74,7 +74,8 @@ export async function readPageUrl(
  * 压缩/剪枝是怎么做的（中）/ How compression & pruning works in practice (EN):
  * - `viewportOnly=true` 时：仅保留与视口相交元素（根层容器保留），完全视口外元素跳过。
  * - `pruneLayout=true` 时：无 id/无语义/无交互/无直接文本的布局容器会被“折叠”，
- *   子节点直接提升输出，减少无意义层级。
+ *   子节点直接提升输出，减少无意义层级；当同一折叠容器提升出多个相邻节点时，
+ *   快照会用括号分组块标记其关联来源（collapsed-group）。
  * - `maxNodes`：全局节点预算，超限后停止继续遍历并追加 truncation 提示。
  * - `maxChildren`：每个父节点只保留前 N 个子元素，其余用 `... (n children omitted)` 汇总。
  * - `maxTextLength`：节点文本按长度截断，避免长段文案占满上下文。

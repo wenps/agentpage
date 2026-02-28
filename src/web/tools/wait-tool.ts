@@ -4,10 +4,11 @@
  * 替代 Playwright 的 waitForSelector/waitForNavigation。
  * 运行环境：浏览器 Content Script。
  *
- * 支持 3 种动作：
+ * 支持 4 种动作：
  *   wait_for_selector  — 等待匹配选择器的元素出现
  *   wait_for_hidden    — 等待元素消失或隐藏
  *   wait_for_text      — 等待页面中出现指定文本
+ *   wait_for_stable    — 等待 DOM 在一段时间内无变化
  */
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
@@ -131,18 +132,57 @@ function waitForText(text: string, timeoutMs: number): Promise<void> {
   });
 }
 
+/**
+ * 等待页面进入稳定状态：在 quietMs 时间窗口内没有 DOM 变化。
+ */
+function waitForDomStable(timeoutMs: number, quietMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    let lastMutationAt = Date.now();
+
+    const finish = (ok: boolean, err?: Error): void => {
+      clearInterval(tick);
+      observer.disconnect();
+      if (ok) resolve();
+      else reject(err ?? new Error("等待页面稳定失败"));
+    };
+
+    const observer = new MutationObserver(() => {
+      lastMutationAt = Date.now();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+
+    const tick = setInterval(() => {
+      const now = Date.now();
+      if (now - startedAt > timeoutMs) {
+        finish(false, new Error(`等待页面稳定超时 (${timeoutMs}ms)`));
+        return;
+      }
+      if (now - lastMutationAt >= quietMs) {
+        finish(true);
+      }
+    }, 50);
+  });
+}
+
 export function createWaitTool(): ToolDefinition {
   return {
     name: "wait",
     description: [
       "Wait for DOM changes on the current page.",
       "Actions: wait_for_selector (element appears), wait_for_hidden (element disappears),",
-      "wait_for_text (specific text appears in page).",
+      "wait_for_text (specific text appears in page), wait_for_stable (DOM stops changing).",
     ].join(" "),
 
     schema: Type.Object({
       action: Type.String({
-        description: "Wait action: wait_for_selector | wait_for_hidden | wait_for_text",
+        description: "Wait action: wait_for_selector | wait_for_hidden | wait_for_text | wait_for_stable",
       }),
       selector: Type.Optional(
         Type.String({ description: "CSS selector for wait_for_selector/wait_for_hidden" }),
@@ -155,6 +195,9 @@ export function createWaitTool(): ToolDefinition {
       ),
       timeout: Type.Optional(
         Type.Number({ description: "Timeout in milliseconds (default: 10000)" }),
+      ),
+      quietMs: Type.Optional(
+        Type.Number({ description: "Quiet window for wait_for_stable in milliseconds (default: 300)" }),
       ),
     }),
 
@@ -191,6 +234,12 @@ export function createWaitTool(): ToolDefinition {
             if (!text) return { content: "缺少 text 参数" };
             await waitForText(text, timeoutMs);
             return { content: `文本 "${text}" 已出现` };
+          }
+
+          case "wait_for_stable": {
+            const quietMs = Math.max(50, Math.floor((params.quietMs as number) ?? 300));
+            await waitForDomStable(timeoutMs, quietMs);
+            return { content: `页面已稳定（静默窗口 ${quietMs}ms）` };
           }
 
           default:

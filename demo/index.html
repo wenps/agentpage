@@ -3,113 +3,66 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AutoPilot Web Agent Demo</title>
+  <title>AutoPilot Demo - Interaction Lab</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
+    * { box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f0f0f;
-      color: #e0e0e0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e6e9ef;
     }
-
-    /* ─── 底部固定的聊天区 ─── */
-    .chat-dock {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      z-index: 900;
-      display: flex;
-      flex-direction: column;
-      max-height: 50vh;
-      background: #0f0f0f;
-      border-top: 2px solid #2a2a4a;
-    }
-    .chat-dock-toggle {
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #151923;
+      border-bottom: 1px solid #2a3140;
+      padding: 10px 16px;
       display: flex;
       align-items: center;
-      justify-content: center;
-      padding: 4px;
-      background: #1a1a2e;
-      cursor: pointer;
-      user-select: none;
-      font-size: 12px;
-      color: #888;
-    }
-    .chat-dock-toggle:hover { background: #25254a; color: #ddd; }
-
-    /* ─── 顶部栏 ─── */
-    header {
-      background: #1a1a2e;
-      padding: 12px 20px;
-      border-bottom: 1px solid #2a2a4a;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    header h1 {
-      font-size: 16px;
-      font-weight: 600;
-      color: #7c83ff;
-    }
-    header .status {
-      font-size: 12px;
-      color: #666;
-      margin-left: auto;
-    }
-    header .status.connected { color: #4caf50; }
-
-    /* ─── 设置区 ─── */
-    .settings {
-      background: #141422;
-      padding: 10px 20px;
-      border-bottom: 1px solid #2a2a4a;
-      display: flex;
-      gap: 12px;
-      align-items: center;
+      gap: 10px;
       flex-wrap: wrap;
     }
-    .settings label {
-      font-size: 12px;
-      color: #888;
+    .topbar h1 {
+      margin: 0;
+      font-size: 16px;
+      color: #9fb4ff;
+      margin-right: auto;
     }
-    .settings input, .settings select {
-      background: #1e1e3a;
-      border: 1px solid #333;
-      color: #ddd;
-      padding: 4px 8px;
-      border-radius: 4px;
+    .topbar label { font-size: 12px; color: #a8b0c0; }
+    .topbar input, .topbar select {
+      background: #0f1320;
+      border: 1px solid #313c50;
+      color: #d7def0;
+      border-radius: 6px;
+      padding: 5px 8px;
       font-size: 12px;
     }
-    .settings input[type="password"] { width: 280px; }
+    #token { width: 280px; }
+    .status { font-size: 12px; color: #84e1a1; }
 
-    /* ─── 交互沙盒区 ─── */
-    .playground {
-      background: #10101d;
-      border-bottom: 1px solid #2a2a4a;
-      padding: 12px 20px;
+    .layout {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
       gap: 12px;
+      padding: 14px;
+      padding-bottom: 280px;
+      max-width: 1100px;
+      margin: 0 auto;
     }
     .card {
-      background: #17172a;
-      border: 1px solid #2a2a4a;
-      border-radius: 10px;
-      padding: 12px;
+      background: #141925;
+      border: 1px solid #293246;
+      border-radius: 12px;
+      padding: 14px;
     }
-    .hidden {
-      display: none !important;
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: #cdd7ff;
     }
-    .card h3 {
-      font-size: 13px;
-      color: #b9bfff;
-      margin-bottom: 10px;
-    }
+
     .row {
       display: flex;
       gap: 8px;
@@ -118,482 +71,288 @@
       flex-wrap: wrap;
     }
     .row label {
+      min-width: 88px;
+      color: #aeb7cb;
       font-size: 12px;
-      color: #9aa;
-      min-width: 72px;
     }
-    .row input,
-    .row select,
-    .row textarea {
-      flex: 1;
-      min-width: 140px;
-      background: #0f0f1e;
-      border: 1px solid #333;
-      color: #ddd;
+    .row input, .row textarea, .row select, .row button {
+      background: #0f1320;
+      border: 1px solid #313c50;
+      color: #d7def0;
       border-radius: 6px;
-      padding: 6px 8px;
-      font-size: 12px;
+      padding: 7px 9px;
+      font-size: 13px;
     }
-    .row textarea {
-      min-height: 70px;
-      resize: vertical;
-    }
-    .actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 8px;
-    }
+    .row input, .row textarea, .row select { flex: 1; min-width: 180px; }
+    .row textarea { min-height: 72px; resize: vertical; }
+
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     .actions button {
-      background: #25254a;
-      color: #ddd;
-      border: 1px solid #3a3a62;
-      border-radius: 6px;
-      padding: 6px 10px;
+      background: #2b3754;
+      border: 1px solid #465982;
+      color: #dfe7ff;
+      border-radius: 7px;
+      padding: 7px 12px;
       cursor: pointer;
       font-size: 12px;
     }
     .actions button.primary {
-      background: #4a5cff;
-      border-color: #4a5cff;
+      background: #4f6fff;
+      border-color: #4f6fff;
       color: #fff;
     }
+    .hint { color: #8e98af; font-size: 12px; }
 
-    .table-wrap {
-      overflow: auto;
-      max-height: 250px;
-      border: 1px solid #2a2a4a;
-      border-radius: 8px;
+    .dropdown {
+      position: relative;
+      min-width: 220px;
+      flex: 1;
     }
+    .dropdown-menu {
+      display: none;
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 4px);
+      background: #111726;
+      border: 1px solid #3b4a69;
+      border-radius: 8px;
+      padding: 4px;
+      max-height: 180px;
+      overflow: auto;
+      z-index: 20;
+    }
+    .dropdown-menu.open { display: block; }
+    .dropdown-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: #d5def8;
+    }
+    .dropdown-item:hover { background: #24314b; }
+
     table {
       width: 100%;
       border-collapse: collapse;
       font-size: 12px;
-      min-width: 560px;
+      margin-top: 8px;
     }
     th, td {
-      padding: 8px 10px;
-      border-bottom: 1px solid #25253f;
+      border-bottom: 1px solid #273044;
+      padding: 8px;
       text-align: left;
     }
-    th {
-      position: sticky;
-      top: 0;
-      background: #1b1b31;
-      color: #b5baff;
-      cursor: pointer;
-      user-select: none;
-    }
-    td .mini {
-      font-size: 11px;
-      color: #8d93c9;
-    }
+    th { color: #b9c6e8; }
 
-    .pill {
-      display: inline-block;
-      border: 1px solid #3a3f75;
-      color: #c7cbff;
-      border-radius: 999px;
-      padding: 2px 8px;
-      font-size: 11px;
-    }
-
-    .modal-mask {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.55);
+    .toast {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #94ecad;
       display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
     }
-    .modal-mask.open { display: flex; }
-    .modal {
-      width: min(520px, 92vw);
-      background: #17172a;
-      border: 1px solid #2f2f52;
-      border-radius: 12px;
-      padding: 14px;
-    }
-    .modal h3 {
-      margin-bottom: 10px;
-      color: #c8ccff;
-      font-size: 14px;
-    }
-    .hint {
-      font-size: 11px;
-      color: #8a8fbf;
-      margin-top: 4px;
-    }
+    .toast.show { display: block; }
 
-    /* ─── 聊天区 ─── */
-    #chat {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px 20px;
+    .dock {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #121826;
+      border-top: 1px solid #2d3750;
+      max-height: 46vh;
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      min-height: 0;
+      z-index: 50;
     }
-
+    .dock-toggle {
+      text-align: center;
+      font-size: 12px;
+      color: #94a2c6;
+      padding: 4px;
+      cursor: pointer;
+      background: #1a2133;
+    }
+    #chat {
+      flex: 1;
+      min-height: 120px;
+      overflow: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
     .msg {
-      max-width: 85%;
-      padding: 10px 14px;
-      border-radius: 12px;
-      font-size: 14px;
-      line-height: 1.5;
+      max-width: 88%;
+      padding: 8px 10px;
+      border-radius: 9px;
       white-space: pre-wrap;
       word-break: break-word;
-    }
-    .msg.user {
-      align-self: flex-end;
-      background: #2a2a6e;
-      color: #e0e0ff;
-      border-bottom-right-radius: 4px;
-    }
-    .msg.assistant {
-      align-self: flex-start;
-      background: #1e1e32;
-      color: #d0d0d0;
-      border-bottom-left-radius: 4px;
-    }
-    .msg.tool-call {
-      align-self: flex-start;
-      background: #1a2e1a;
-      color: #a0d0a0;
-      font-family: 'Menlo', 'Consolas', monospace;
       font-size: 12px;
-      border-left: 3px solid #4caf50;
     }
-    .msg.tool-result {
-      align-self: flex-start;
-      background: #1a1a2e;
-      color: #b0b0d0;
-      font-family: 'Menlo', 'Consolas', monospace;
-      font-size: 12px;
-      border-left: 3px solid #7c83ff;
-    }
-    .msg.error {
-      align-self: flex-start;
-      background: #2e1a1a;
-      color: #f08080;
-      border-left: 3px solid #e74c3c;
-    }
-    .msg .label {
-      font-size: 11px;
-      font-weight: 600;
-      margin-bottom: 4px;
-      opacity: 0.7;
-    }
+    .msg.user { align-self: flex-end; background: #2d3f76; }
+    .msg.assistant { align-self: flex-start; background: #1b253e; }
+    .msg.tool-call { align-self: flex-start; background: #173126; border-left: 3px solid #3ecf8e; }
+    .msg.tool-result { align-self: flex-start; background: #1b2337; border-left: 3px solid #6687ff; }
+    .msg.system { align-self: flex-start; background: #2b2c37; color: #b7bdd1; }
+    .msg.error { align-self: flex-start; background: #432226; color: #ffc9c9; }
 
-    /* ─── 输入区 ─── */
-    .input-area {
-      background: #1a1a2e;
-      padding: 12px 20px;
-      border-top: 1px solid #2a2a4a;
+    .quick { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px; border-top: 1px solid #27314a; }
+    .quick button {
+      background: #1c2740;
+      color: #c7d4ff;
+      border: 1px solid #33456f;
+      border-radius: 6px;
+      font-size: 11px;
+      padding: 5px 8px;
+      cursor: pointer;
+    }
+    .input {
       display: flex;
       gap: 8px;
+      padding: 10px;
+      border-top: 1px solid #27314a;
     }
     #input {
       flex: 1;
-      background: #0f0f1e;
-      border: 1px solid #333;
-      color: #e0e0e0;
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 14px;
-      outline: none;
+      background: #0f1320;
+      border: 1px solid #313c50;
+      color: #d7def0;
+      border-radius: 7px;
+      padding: 9px;
+      font-size: 13px;
     }
-    #input:focus { border-color: #7c83ff; }
-    #input::placeholder { color: #555; }
-
     #send {
-      background: #7c83ff;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
+      background: #4f6fff;
+      color: #fff;
+      border: 0;
+      border-radius: 7px;
+      padding: 0 14px;
       cursor: pointer;
-      font-size: 14px;
-      font-weight: 600;
     }
-    #send:hover { background: #6b72e8; }
-    #send:disabled { background: #333; cursor: not-allowed; }
-
-    /* ─── 测试面板 ─── */
-    .test-panel {
-      background: #141422;
-      padding: 10px 20px;
-      border-top: 1px solid #2a2a4a;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .test-panel button {
-      background: #1e1e3a;
-      color: #aaa;
-      border: 1px solid #333;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .test-panel button:hover { background: #2a2a4a; color: #ddd; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>🤖 AutoPilot Web Agent Demo</h1>
+  <div class="topbar">
+    <h1>AutoPilot · Interaction Lab</h1>
     <span class="status" id="status">未连接</span>
-  </header>
-
-  <div class="settings">
-    <label>Token:</label>
-    <input type="password" id="token" placeholder="DeepSeek API Key (sk-xxx...)" />
-    <label>Model:</label>
+    <label>Token</label>
+    <input id="token" type="password" placeholder="DeepSeek Token" />
+    <label>Model</label>
     <select id="model">
-      <option value="deepseek-chat" selected>DeepSeek-V3.2</option>
-      <option value="deepseek-reasoner">DeepSeek-R1</option>
+      <option value="deepseek-chat" selected>deepseek-chat</option>
+      <option value="deepseek-reasoner">deepseek-reasoner</option>
     </select>
-    <label>响应模式:</label>
+    <label>Stream</label>
     <select id="streamMode">
-      <option value="stream">Stream (SSE)</option>
-      <option value="json" selected>JSON</option>
+      <option value="stream">stream</option>
+      <option value="json" selected>json</option>
     </select>
-    <label>Dry-run:</label>
-    <input type="checkbox" id="dryrun" />
-    <label>记忆:</label>
-    <input type="checkbox" id="memory" />
+    <label>Dry-run</label>
+    <input id="dryrun" type="checkbox" />
+    <label>Memory</label>
+    <input id="memory" type="checkbox" />
   </div>
 
-  <section class="playground" id="playground">
-    <div class="card hidden" id="employeeFormCard">
-      <h3>📋 动态表单（提交后入表）</h3>
+  <main class="layout">
+    <section class="card">
+      <h2>交互 Demo：仓库创建（输入 / 下拉 / 单选 / 复选 / 提交）</h2>
       <div class="row">
-        <label for="employeeName">姓名</label>
-        <input id="employeeName" placeholder="例如：李雷" />
+        <label for="repoSearch">搜索</label>
+        <input id="repoSearch" placeholder="输入关键词后按 Enter 过滤" />
       </div>
       <div class="row">
-        <label for="employeeEmail">邮箱</label>
-        <input id="employeeEmail" type="email" placeholder="name@company.com" />
+        <label for="repoName">仓库名称</label>
+        <input id="repoName" placeholder="例如：my-awesome-repo" />
       </div>
       <div class="row">
-        <label for="employeeRole">角色</label>
-        <select id="employeeRole">
-          <option value="developer">开发</option>
-          <option value="designer">设计</option>
-          <option value="manager">经理</option>
+        <label for="repoPath">仓库路径</label>
+        <input id="repoPath" placeholder="例如：team/my-awesome-repo" />
+      </div>
+      <div class="row">
+        <label for="repoDesc">描述</label>
+        <textarea id="repoDesc" placeholder="可选描述"></textarea>
+      </div>
+      <div class="row">
+        <label for="repoOwner">Owner</label>
+        <select id="repoOwner">
+          <option value="frontend">frontend</option>
+          <option value="backend">backend</option>
+          <option value="platform">platform</option>
         </select>
       </div>
-      <div class="row" id="budgetRow" style="display:none;">
-        <label for="employeeBudget">预算</label>
-        <input id="employeeBudget" type="number" min="0" step="1000" placeholder="仅经理必填" />
+      <div class="row">
+        <label>可见性</label>
+        <label><input type="radio" name="visibility" value="private" checked /> 私有</label>
+        <label><input type="radio" name="visibility" value="internal" /> 内部公开</label>
+        <label><input type="radio" name="visibility" value="public" /> 公开</label>
       </div>
       <div class="row">
-        <label for="employeeStatus">状态</label>
-        <select id="employeeStatus">
-          <option value="active">在职</option>
-          <option value="onleave">休假</option>
-          <option value="inactive">离职</option>
-        </select>
+        <label>模板类型</label>
+        <div class="dropdown">
+          <button type="button" id="tagDropdownTrigger">选择模板：<span id="selectedTag">Node</span></button>
+          <div class="dropdown-menu" id="tagDropdownMenu">
+            <div role="option" class="dropdown-item" data-value="Node">Node</div>
+            <div role="option" class="dropdown-item" data-value="React">React</div>
+            <div role="option" class="dropdown-item" data-value="Python">Python</div>
+            <div role="option" class="dropdown-item" data-value="Go">Go</div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <label>初始化</label>
+        <label><input id="repoReadme" type="checkbox" /> 创建 README</label>
       </div>
       <div class="actions">
-        <button class="primary" id="submitEmployee">提交员工</button>
-        <button id="resetEmployee">重置表单</button>
-        <span class="hint" id="formHint">提示：角色选“经理”后预算字段会出现。</span>
+        <button id="openCreateModal">打开确认弹窗</button>
+        <button class="primary" id="createRepoBtn">创建仓库</button>
+        <span class="hint" id="formMessage">请先填写仓库名称。</span>
+      </div>
+      <div class="toast" id="toast">创建成功</div>
+    </section>
+
+    <section class="card">
+      <h2>仓库列表（可用于 Enter 搜索、点击、删除）</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>路径</th>
+            <th>Owner</th>
+            <th>可见性</th>
+            <th>模板</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="repoTableBody"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <div id="createModalMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;align-items:center;justify-content:center;">
+    <div style="width:min(420px,90vw);background:#151b2b;border:1px solid #334160;border-radius:10px;padding:14px;">
+      <h3 style="margin:0 0 10px;color:#cad6ff;font-size:14px;">确认创建仓库</h3>
+      <p id="modalSummary" style="font-size:12px;color:#b2bdd8;line-height:1.6;"></p>
+      <div class="actions" style="justify-content:flex-end;">
+        <button id="cancelCreateModal">取消</button>
+        <button class="primary" id="confirmCreateModal">确认创建</button>
       </div>
     </div>
+  </div>
 
-    <div class="card">
-      <h3>🧩 弹窗交互（复杂输入）</h3>
-      <div class="actions">
-        <button class="primary" id="openModal">打开任务弹窗</button>
-      </div>
-      <p class="hint" id="modalResult">尚未提交弹窗内容</p>
-    </div>
-
-    <div class="card hidden" id="employeeTableCard" style="grid-column: 1 / -1;">
-      <h3>📊 员工表格（筛选 + 排序 + 删除）</h3>
-      <div class="row">
-        <label for="filterKeyword">关键词</label>
-        <input id="filterKeyword" placeholder="按姓名/邮箱筛选" />
-        <label for="filterStatus" style="min-width:52px;">状态</label>
-        <select id="filterStatus" style="max-width:140px;">
-          <option value="all">全部</option>
-          <option value="active">在职</option>
-          <option value="onleave">休假</option>
-          <option value="inactive">离职</option>
-        </select>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th data-sort="name">姓名</th>
-              <th>邮箱</th>
-              <th>角色</th>
-              <th data-sort="status">状态</th>
-              <th data-sort="createdAt">创建时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="employeeTableBody"></tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <!-- ─── 快照优化测试区域 ─── -->
-  <section id="snapshotTestArea" style="border-top: 2px solid #4a5cff; margin-top: 0;">
-
-    <!-- 测试1: 深层无意义嵌套（智能剪枝测试） -->
-    <div>
-      <div>
-        <div>
-          <div>
-            <div>
-              <div>
-                <button id="deepNestedBtn" onclick="alert('深层按钮被点击')">🎯 深层嵌套按钮</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 测试2: 大量空布局容器（剪枝测试） -->
-    <div>
-      <div>
-        <div></div>
-        <div>
-          <div></div>
-          <div>
-            <span></span>
-          </div>
-        </div>
-      </div>
-      <div>
-        <div>
-          <div></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 测试3: 布局容器混合有意义内容 -->
-    <div>
-      <div>
-        <div>
-          <h3 style="color:#b9bfff; padding:8px 20px;">📐 剪枝测试：下面的按钮应该被保留，外层空 div 应该被折叠</h3>
-        </div>
-        <div>
-          <div>
-            <input id="pruneTestInput" type="text" placeholder="剪枝测试输入框" style="margin:4px 20px; padding:6px; background:#1e1e3a; border:1px solid #333; color:#ddd; border-radius:4px;" />
-          </div>
-          <div>
-            <div>
-              <button id="pruneTestBtn" style="margin:4px 20px; padding:6px 12px; background:#25254a; color:#ddd; border:1px solid #3a3a62; border-radius:6px; cursor:pointer;">剪枝测试按钮</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 测试4: 超高内容区（视口裁剪测试） -->
-    <div style="padding: 12px 20px;">
-      <h3 style="color:#b9bfff; margin-bottom:8px;">📏 视口裁剪测试：以下区域高度 3000px，大部分在视口外</h3>
-      <p style="color:#888; font-size:12px; margin-bottom:12px;">只有视口内可见的元素应出现在快照中，滚动后快照内容会变化。</p>
-    </div>
-    <div style="height: 3000px; background: linear-gradient(180deg, #1a1a2e 0%, #0a0a15 100%); position: relative; padding: 20px;">
-      <!-- 顶部（通常可见） -->
-      <div style="position: absolute; top: 20px; left: 20px; right: 20px;">
-        <button id="vpTop" style="padding:8px 16px; background:#4a5cff; color:#fff; border:none; border-radius:6px; cursor:pointer;">🔝 顶部按钮（应该可见）</button>
-        <span style="color:#4caf50; margin-left:12px; font-size:13px;">← 这个应该出现在快照中</span>
-      </div>
-
-      <!-- 中部（可能不可见） -->
-      <div style="position: absolute; top: 1000px; left: 20px; right: 20px;">
-        <button id="vpMiddle" style="padding:8px 16px; background:#ff9800; color:#fff; border:none; border-radius:6px; cursor:pointer;">🔄 中部按钮（1000px处）</button>
-        <span style="color:#ff9800; margin-left:12px; font-size:13px;">← 需要滚动才能看到</span>
-      </div>
-
-      <!-- 底部（几乎不可见） -->
-      <div style="position: absolute; top: 2000px; left: 20px; right: 20px;">
-        <button id="vpBottom" style="padding:8px 16px; background:#e74c3c; color:#fff; border:none; border-radius:6px; cursor:pointer;">🔚 底部按钮（2000px处）</button>
-        <span style="color:#e74c3c; margin-left:12px; font-size:13px;">← 远在视口外</span>
-      </div>
-
-      <!-- 最底部 -->
-      <div style="position: absolute; bottom: 20px; left: 20px; right: 20px;">
-        <p id="vpEnd" style="color:#666; font-size:12px;">📍 这是 3000px 高度区域的底部，视口裁剪开启时不应出现在快照中。</p>
-      </div>
-    </div>
-
-    <!-- 测试5: 大量重复列表项（token 消耗测试） -->
-    <div style="padding: 12px 20px;">
-      <h3 style="color:#b9bfff; margin-bottom:8px;">📋 重复列表测试：50 个列表项</h3>
-    </div>
-    <div style="padding: 0 20px 20px;">
-      <ul id="massiveList" style="list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px;">
-      </ul>
-    </div>
-
-  </section>
-
-  <!-- 底部留白，防止内容被固定聊天区遮挡 -->
-  <div style="height: 260px;"></div>
-
-  <!-- ─── 固定在底部的聊天区 ─── -->
-  <div class="chat-dock" id="chatDock">
-    <div class="chat-dock-toggle" id="chatDockToggle">▲ 聊天面板 ▲</div>
+  <div class="dock" id="chatDock" data-autopilot-ignore>
+    <div class="dock-toggle" id="chatDockToggle">▲ 聊天面板 ▲</div>
     <div id="chat"></div>
-    <div class="test-panel">
-      <span style="color:#666;font-size:12px;line-height:28px;">快捷测试：</span>
-      <button onclick="sendQuick('获取当前页面标题和URL')">📄 页面信息</button>
-      <button onclick="sendQuick('获取页面DOM快照')">🌲 DOM快照</button>
-      <button onclick="sendQuick('点击页面上的第一个按钮')">👆 点击按钮</button>
-      <button onclick="sendQuick('获取页面上所有链接的文本')">🔗 所有链接</button>
-      <button onclick="sendQuick('把页面滚动到底部')">⬇️ 滚动底部</button>
-      <button onclick="sendQuick('执行 document.querySelectorAll(\'*\').length 看看有多少DOM节点')">📊 DOM计数</button>
-      <button onclick="clearHistory()">🗑️ 清空记忆</button>
+    <div class="quick">
+      <button onclick="sendQuick('随便生成一个仓库名称填到仓库名称输入框')">填名称</button>
+      <button onclick="sendQuick('把模板类型切到 React，然后勾选创建 README')">选模板</button>
+      <button onclick="sendQuick('把可见性改为内部公开，然后点击创建仓库')">改可见性并创建</button>
+      <button onclick="sendQuick('在搜索框输入 repo 然后按 Enter')">搜索并回车</button>
+      <button onclick="clearHistory()">清空记忆</button>
     </div>
-    <div class="input-area">
-      <input type="text" id="input" placeholder="输入指令，让 AI 操作当前页面..." />
+    <div class="input">
+      <input id="input" placeholder="输入要执行的网页操作" />
       <button id="send">发送</button>
-    </div>
-  </div>
-
-  <div class="modal-mask" id="taskModalMask" aria-hidden="true">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
-      <h3 id="taskModalTitle">新建任务弹窗</h3>
-      <div class="row">
-        <label for="taskTitle">任务名</label>
-        <input id="taskTitle" placeholder="例如：发布 v0.3.0" />
-      </div>
-      <div class="row">
-        <label for="taskPriority">优先级</label>
-        <select id="taskPriority">
-          <option value="P0">P0</option>
-          <option value="P1">P1</option>
-          <option value="P2">P2</option>
-        </select>
-      </div>
-      <div class="row">
-        <label for="taskDueDate">截止日期</label>
-        <input id="taskDueDate" type="date" />
-      </div>
-      <div class="row">
-        <label for="taskMembers">参与人</label>
-        <input id="taskMembers" placeholder="逗号分隔，例如：A,B,C" />
-      </div>
-      <div class="row">
-        <label for="taskDesc">描述</label>
-        <textarea id="taskDesc" placeholder="输入任务详情"></textarea>
-      </div>
-      <div class="actions">
-        <button class="primary" id="confirmTask">发送</button>
-        <button id="cancelTask">取消</button>
-      </div>
     </div>
   </div>
 
