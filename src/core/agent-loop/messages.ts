@@ -162,8 +162,11 @@ export function buildCompactMessages(
         "Use hash IDs (e.g. #a1b2c) from the snapshot as selector params.",
         "Do NOT call page_info (get_url/get_title/query_all/snapshot).",
         "Batch independent visible actions in one round.",
+        "Build the minimal action array from current snapshot to finish this remaining instruction in one round whenever possible.",
+        "For deterministic increase/decrease controls, compute delta from current visible value and issue exactly that many clicks in one round (e.g., +2 => two increase clicks). Do not overshoot then undo.",
         "If action changes DOM (open modal/navigate), stop that batch and continue next round.",
         "For dropdown/select fields, use dom with action=select_option (or fill on a select).",
+        "Stop rule: once requested state is reached, stop tool calls. If verification is needed, verify once and then output REMAINING: DONE.",
         allowAgentUiInteraction
           ? "User explicitly asked to operate AutoPilot UI. You may interact with chat input/send/dock only as requested."
           : "Do NOT interact with any AI chat UI elements (chat input, send button, dock). Only operate on the actual page content.",
@@ -218,6 +221,9 @@ export function buildCompactMessages(
     "If action changes DOM (open modal/navigate), stop after that batch and continue next round.",
     "Do NOT call page_info (get_url/get_title/query_all/snapshot).",
     "For dropdown/select fields, use dom with action=select_option (or fill on a select).",
+    "Build the minimal action array from current snapshot to finish this remaining instruction in one round whenever possible.",
+    "For deterministic increase/decrease controls, compute delta from current visible value and issue exactly that many clicks in one round (e.g., +2 => two increase clicks). Do not overshoot then undo.",
+    "Stop rule: once requested state is reached, stop tool calls. If verification is needed, verify once and then output REMAINING: DONE.",
     allowAgentUiInteraction
       ? "User explicitly asked to operate AutoPilot UI. You may interact with chat input/send/dock only as requested."
       : "Do NOT interact with any AI chat UI elements (chat input, send button, dock). Only operate on the actual page content.",

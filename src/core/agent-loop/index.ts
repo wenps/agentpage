@@ -210,7 +210,17 @@ export async function executeAgentLoop(
       return action === "goto" || action === "back" || action === "forward" || action === "reload";
     }
     if (toolName === "dom") {
-      return action === "click" || action === "press";
+      // 默认不对普通 click 强制断轮，允许同轮批量完成确定性动作（如步进器连续点击）。
+      // Do not force-break on normal clicks so deterministic multi-click tasks can finish in one round.
+      if (action === "press") {
+        const key = typeof toolInput === "object" && toolInput !== null
+          ? String((toolInput as { key?: unknown; value?: unknown }).key ?? (toolInput as { value?: unknown }).value ?? "")
+          : "";
+        // Enter 往往触发表单提交/DOM 变化，保留断轮。
+        // Enter commonly triggers submit/DOM changes; keep force-break.
+        return key === "Enter";
+      }
+      return false;
     }
     if (toolName === "evaluate") {
       return true;
@@ -557,8 +567,7 @@ export async function executeAgentLoop(
     previousRoundPlannedTasks = plannedTasksCurrentRound;
 
     // 保护 5：空转检测
-    const toolCallNames = executedTaskCalls.map(tc => tc.name);
-    const idleResult = detectIdleLoop(toolCallNames, consecutiveReadOnlyRounds);
+    const idleResult = detectIdleLoop(executedTaskCalls, consecutiveReadOnlyRounds);
     if (idleResult === -1) {
       finalReply = response.text || "任务已完成。";
       if (finalReply) callbacks?.onText?.(finalReply);

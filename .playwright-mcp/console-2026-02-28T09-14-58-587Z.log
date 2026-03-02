@@ -1,0 +1,3 @@
+[    1079ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3001/favicon.ico:0
+[ 3707167ms] [ERROR] [vite] SyntaxError: The requested module '/@fs/Users/xiaoshanwen/Desktop/autopilot/src/web/tools/dom-tool.ts?t=1772273805733' does not provide an export named 'getActiveRefStore' @ http://localhost:3001/@vite/client:808
+[ 3707167ms] [ERROR] [vite] Failed to reload /App.vue. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:3001/@vite/client:808

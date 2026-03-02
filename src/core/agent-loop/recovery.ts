@@ -171,16 +171,24 @@ export async function handleNavigationUrlChange(
 /** 只读工具集合（中）/ Read-only tool set (EN). */
 const READ_ONLY_TOOLS = new Set(["page_info"]);
 
+/** DOM 只读动作集合（中）/ Read-only DOM actions (EN). */
+const READ_ONLY_DOM_ACTIONS = new Set(["get_text", "get_attr"]);
+
 /**
  * 空转检测（中）/ Detect idle loops dominated by read-only actions (EN).
  * 返回 -1 表示应终止循环。
  * Returns -1 when loop should terminate.
  */
 export function detectIdleLoop(
-  toolCallNames: string[],
+  toolCalls: Array<{ name: string; input: unknown }>,
   consecutiveReadOnlyRounds: number,
 ): number {
-  const allReadOnly = toolCallNames.every(name => READ_ONLY_TOOLS.has(name));
+  const allReadOnly = toolCalls.length > 0 && toolCalls.every(({ name, input }) => {
+    if (READ_ONLY_TOOLS.has(name)) return true;
+    if (name !== "dom") return false;
+    const action = getToolAction(input);
+    return Boolean(action && READ_ONLY_DOM_ACTIONS.has(action));
+  });
   if (allReadOnly) {
     const newCount = consecutiveReadOnlyRounds + 1;
     // 连续 2 轮纯只读 → 返回 -1 表示强制终止

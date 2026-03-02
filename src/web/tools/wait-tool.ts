@@ -1,41 +1,94 @@
 /**
- * Wait Tool — 基于 MutationObserver 的元素等待工具。
+ * Wait Tool 等待工具 / Wait utility for DOM conditions.
  *
- * 替代 Playwright 的 waitForSelector/waitForNavigation。
- * 运行环境：浏览器 Content Script。
+ * 支持动作 / Supported actions:
+ * - wait_for_selector: 等待选择器达到状态 / wait selector state
+ * - wait_for_hidden: 等待元素隐藏或移除 / wait element hidden or detached
+ * - wait_for_text: 等待页面出现文本 / wait text appears in page
+ * - wait_for_stable: 等待 DOM 进入静默窗口 / wait DOM quiet window
  *
- * 支持 4 种动作：
- *   wait_for_selector  — 等待匹配选择器的元素出现
- *   wait_for_hidden    — 等待元素消失或隐藏
- *   wait_for_text      — 等待页面中出现指定文本
- *   wait_for_stable    — 等待 DOM 在一段时间内无变化
+ * 说明 / Notes:
+ * - hash selector（如 #abc123）优先通过 RefStore 解析。
+ * - 可见性语义与 dom-tool 保持一致（参考 Playwright 风格）。
  */
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
+import { getActiveRefStore } from "./dom-tool.js";
 
-/** 默认超时时间（毫秒） */
 const DEFAULT_TIMEOUT = 10_000;
+const POLL_INTERVAL_MS = 80;
+const STABLE_TICK_MS = 50;
+const OBSERVER_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  attributes: true,
+  characterData: true,
+};
+const TEXT_OBSERVER_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  characterData: true,
+};
 
 type SelectorState = "attached" | "visible" | "hidden" | "detached";
 
 /**
- * Playwright 风格可见性判定（近似）。
+ * 可见性判定 / Visibility check.
+ *
+ * 与 dom-tool 保持一致，处理 display:contents、visibility、opacity、零尺寸等场景。
  */
 function isVisible(el: Element): boolean {
   if (!(el instanceof HTMLElement || el instanceof SVGElement)) return false;
   if (!el.isConnected) return false;
   const style = window.getComputedStyle(el);
-  if (style.display === "none" || style.visibility === "hidden") return false;
+
+  if (style.display === "contents") {
+    for (let child = el.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType === Node.ELEMENT_NODE && isVisible(child as Element)) return true;
+      if (child.nodeType === Node.TEXT_NODE) {
+        const range = document.createRange();
+        range.selectNodeContents(child);
+        const rects = range.getClientRects();
+        for (let i = 0; i < rects.length; i++) {
+          if (rects[i].width > 0 && rects[i].height > 0) return true;
+        }
+      }
+    }
+    return false;
+  }
+  if (style.display === "none") return false;
+  if (typeof el.checkVisibility === "function") {
+    if (!el.checkVisibility()) return false;
+  }
+  if (style.visibility !== "visible") return false;
   if (style.opacity === "0") return false;
   const rect = el.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
 }
 
 /**
- * 读取 selector 当前状态。
+ * 解析选择器 / Resolve selector.
+ *
+ * 先尝试 RefStore hash，再回退到 document.querySelector。
+ */
+function resolveSelector(selector: string): Element | null {
+  if (selector.startsWith("#")) {
+    const store = getActiveRefStore();
+    if (store) {
+      const id = selector.slice(1);
+      if (store.has(id)) return store.get(id) ?? null;
+    }
+  }
+  try { return document.querySelector(selector); } catch { return null; }
+}
+
+/**
+ * 计算选择器状态 / Evaluate selector state.
+ *
+ * @returns matched 表示是否达到目标状态；element 为当前命中的元素（如果存在）。
  */
 function evaluateSelectorState(selector: string, state: SelectorState): { matched: boolean; element?: Element } {
-  const el = document.querySelector(selector) ?? undefined;
+  const el = resolveSelector(selector) ?? undefined;
   switch (state) {
     case "attached":
       return { matched: Boolean(el), element: el };
@@ -51,7 +104,9 @@ function evaluateSelectorState(selector: string, state: SelectorState): { matche
 }
 
 /**
- * 等待 selector 达到指定状态（近似 Playwright state 语义）。
+ * 等待选择器达到指定状态 / Wait selector reaches state.
+ *
+ * 策略：轮询 + MutationObserver 双通道，既保证及时性也降低漏检概率。
  */
 function waitForSelectorState(
   selector: string,
@@ -87,21 +142,18 @@ function waitForSelectorState(
       finish(() => reject(new Error(`等待 "${selector}" 达到状态 "${state}" 超时 (${timeoutMs}ms)`)));
     }, timeoutMs);
 
-    const interval = setInterval(check, 80);
+    const interval = setInterval(check, POLL_INTERVAL_MS);
     const observer = new MutationObserver(check);
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      characterData: true,
-    });
+    observer.observe(document.body, OBSERVER_OPTIONS);
 
     check();
   });
 }
 
 /**
- * 等待页面中出现指定文本。
+ * 等待文本出现 / Wait text appears.
+ *
+ * 先做一次即时检查，再监听 DOM 变化。
  */
 function waitForText(text: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -124,16 +176,14 @@ function waitForText(text: string, timeoutMs: number): Promise<void> {
       }
     });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
+    observer.observe(document.body, TEXT_OBSERVER_OPTIONS);
   });
 }
 
 /**
- * 等待页面进入稳定状态：在 quietMs 时间窗口内没有 DOM 变化。
+ * 等待 DOM 稳定 / Wait DOM stable.
+ *
+ * 定义：quietMs 窗口内没有任何 MutationObserver 事件。
  */
 function waitForDomStable(timeoutMs: number, quietMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -151,12 +201,7 @@ function waitForDomStable(timeoutMs: number, quietMs: number): Promise<void> {
       lastMutationAt = Date.now();
     });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      characterData: true,
-    });
+    observer.observe(document.body, OBSERVER_OPTIONS);
 
     const tick = setInterval(() => {
       const now = Date.now();
@@ -167,7 +212,7 @@ function waitForDomStable(timeoutMs: number, quietMs: number): Promise<void> {
       if (now - lastMutationAt >= quietMs) {
         finish(true);
       }
-    }, 50);
+    }, STABLE_TICK_MS);
   });
 }
 
