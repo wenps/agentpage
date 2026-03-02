@@ -1,23 +1,20 @@
 /**
- * 极简系统提示词构建器（中）/ Minimal system prompt builder (EN).
+ * 极简系统提示词构建器。
  *
  * 纯函数，不依赖运行时环境；调用方只需传入工具定义和可选扩展指令。
- * Pure function with no runtime coupling; callers pass tools and optional extra instructions.
  */
 import type { ToolDefinition } from "./tool-registry.js";
 
 export type SystemPromptParams = {
-  /** 已注册工具列表（中）/ Registered tool definitions (EN). */
+  /** 已注册工具列表。 */
   tools?: ToolDefinition[];
-  /** AI 思考深度标签（中）/ Optional thinking-level label (EN). */
+  /** AI 思考深度标签。 */
   thinkingLevel?: string;
-  /** 额外英文指令（中）/ Additional English instructions (EN). */
+  /** 额外英文指令。 */
   extraInstructions?: string | string[];
 };
 
-/**
- * 规范化额外指令（中）/ Normalize additional instructions (EN).
- */
+/** 规范化额外指令。 */
 function normalizeExtraInstructions(input?: string | string[]): string[] {
   if (!input) return [];
   const rawList = Array.isArray(input) ? input : [input];
@@ -25,15 +22,11 @@ function normalizeExtraInstructions(input?: string | string[]): string[] {
 }
 
 /**
- * 构建系统提示词（中）/ Build system prompt (EN).
+ * 构建系统提示词。
  *
  * 约束：
  * - 输出给模型的提示词正文统一为英文。
- * - 中文仅用于代码注释，便于团队维护。
- *
- * Constraints:
- * - Prompt text sent to model stays English-only.
- * - Chinese content is used in code comments only for maintainability.
+ * - 中文仅用于源码注释，便于团队维护。
  */
 export function buildSystemPrompt(params: SystemPromptParams = {}): string {
   const sections: string[] = [];
@@ -80,7 +73,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
     ].join("\n"),
   );
 
-  // 工具列表（中）/ Available tool list (EN).
+  // 工具列表
   const tools = params.tools ?? [];
   if (tools.length > 0) {
     const toolLines = tools.map(t => `- **${t.name}**: ${t.description}`);
@@ -91,7 +84,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
     );
   }
 
-  // 思考深度（中）/ Thinking-level hint (EN).
+  // 思考深度提示
   if (params.thinkingLevel) {
     sections.push(
       [
@@ -101,7 +94,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
     );
   }
 
-  // 额外指令（中）/ Additional custom instructions (EN).
+  // 额外自定义指令
   const extraInstructions = normalizeExtraInstructions(params.extraInstructions);
   if (extraInstructions.length > 0) {
     sections.push(

@@ -71,6 +71,16 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  /** 按名称检查工具是否已注册。 */
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
+  /** 按名称注销工具，返回是否删除成功。 */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   /**
    * 根据工具名分发并执行工具调用。
    * - 找到工具 → 执行 execute() → 返回结果

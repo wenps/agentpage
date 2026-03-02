@@ -168,16 +168,15 @@ export async function handleNavigationUrlChange(
 
 // ─── 空转检测 ───
 
-/** 只读工具集合（中）/ Read-only tool set (EN). */
+/** 只读工具集合。 */
 const READ_ONLY_TOOLS = new Set(["page_info"]);
 
-/** DOM 只读动作集合（中）/ Read-only DOM actions (EN). */
+/** DOM 只读动作集合。 */
 const READ_ONLY_DOM_ACTIONS = new Set(["get_text", "get_attr"]);
 
 /**
- * 空转检测（中）/ Detect idle loops dominated by read-only actions (EN).
+ * 空转检测：识别连续只读轮次并终止。
  * 返回 -1 表示应终止循环。
- * Returns -1 when loop should terminate.
  */
 export function detectIdleLoop(
   toolCalls: Array<{ name: string; input: unknown }>,

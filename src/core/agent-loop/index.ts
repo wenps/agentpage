@@ -1,8 +1,8 @@
 /**
- * Agent Loop 主流程（中）/ Core environment-agnostic agent loop (EN).
+ * Agent Loop 主流程
  *
  * 负责消息构建、AI 决策、工具执行、恢复保护与指标汇总。
- * Orchestrates message build, AI decisions, tool execution, recovery, and metrics.
+ * 
  *
  * 流程图（文本）：
  *
@@ -67,7 +67,7 @@ export async function executeAgentLoop(
     callbacks,
   } = params;
 
-  // 固定依赖与运行态容器（中）/ Static dependencies and runtime containers (EN).
+  // 固定依赖与运行态容器（中）
   const tools = registry.getDefinitions();
   const allToolCalls: AgentLoopResult["toolCalls"] = [];
   const fullToolTrace: ToolTraceEntry[] = [];
@@ -76,10 +76,10 @@ export async function executeAgentLoop(
     latestSnapshot: initialSnapshot,
   };
 
-  // 最终输出（中）/ Final output state (EN).
+  // 最终输出（中）
   let finalReply = "";
 
-  // 循环控制状态（中）/ Loop control state (EN).
+  // 循环控制状态（中）
   let consecutiveSnapshotCalls = 0;
   let consecutiveReadOnlyRounds = 0;
   let usedRounds = 0;
@@ -199,10 +199,10 @@ export async function executeAgentLoop(
   };
 
   /**
-   * 判定动作是否会触发 DOM 结构变化（中）/ Whether action may cause DOM-shape change (EN).
+   * 判定动作是否会触发 DOM 结构变化（
    *
    * 触发后应强制断轮，等待下一轮新快照继续。
-   * Force round break after such action and continue with refreshed snapshot next round.
+   * 
    */
   const shouldForceRoundBreak = (toolName: string, toolInput: unknown): boolean => {
     const action = getToolAction(toolInput);
@@ -210,14 +210,12 @@ export async function executeAgentLoop(
       return action === "goto" || action === "back" || action === "forward" || action === "reload";
     }
     if (toolName === "dom") {
-      // 默认不对普通 click 强制断轮，允许同轮批量完成确定性动作（如步进器连续点击）。
-      // Do not force-break on normal clicks so deterministic multi-click tasks can finish in one round.
+      // 普通 click 不强制断轮，允许同轮批量完成确定性动作（如步进器连续点击）。
       if (action === "press") {
         const key = typeof toolInput === "object" && toolInput !== null
           ? String((toolInput as { key?: unknown; value?: unknown }).key ?? (toolInput as { value?: unknown }).value ?? "")
           : "";
-        // Enter 往往触发表单提交/DOM 变化，保留断轮。
-        // Enter commonly triggers submit/DOM changes; keep force-break.
+        // Enter 往往触发表单提交或结构变化，保留断轮。
         return key === "Enter";
       }
       return false;
@@ -567,9 +565,10 @@ export async function executeAgentLoop(
     previousRoundPlannedTasks = plannedTasksCurrentRound;
 
     // 保护 5：空转检测
-    const idleResult = detectIdleLoop(executedTaskCalls, consecutiveReadOnlyRounds);
+    const attemptedTaskCalls = response.toolCalls.map(tc => ({ name: tc.name, input: tc.input }));
+    const idleResult = detectIdleLoop(attemptedTaskCalls, consecutiveReadOnlyRounds);
     if (idleResult === -1) {
-      finalReply = response.text || "任务已完成。";
+      finalReply = response.text?.trim() || "任务已完成。";
       if (finalReply) callbacks?.onText?.(finalReply);
       break;
     }

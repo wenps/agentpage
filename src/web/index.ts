@@ -81,8 +81,12 @@ export type WebAgentOptions = {
   stream?: boolean;
   /** 是否启用干运行模式 */
   dryRun?: boolean;
-  /** 自定义系统提示词（不传则使用默认 Web 提示词） */
-  systemPrompt?: string;
+  /**
+   * 系统提示词注册项。
+   * - string：按默认 key 注册一条
+   * - Record<string, string>：按 key 批量注册多条
+   */
+  systemPrompt?: string | Record<string, string>;
   /** 最大工具调用轮次（默认 10） */
   maxRounds?: number;
   /** 是否启用多轮对话记忆（默认 false） */
@@ -96,6 +100,11 @@ export type WebAgentOptions = {
 // ─── WebAgent 类 ───
 
 export class WebAgent {
+  /** 默认系统提示词 key（兼容旧版 setSystemPrompt(prompt)）。 */
+  private static readonly DEFAULT_SYSTEM_PROMPT_KEY = "default";
+  /** 默认内置工具名（注册后受保护，不允许删除）。 */
+  private static readonly DEFAULT_TOOL_NAMES = ["dom", "navigate", "page_info", "wait", "evaluate"] as const;
+
   /** 用户传入的自定义 AI 客户端实例（优先级高于 token/provider） */
   private client?: AIClient;
   private token: string;
@@ -105,7 +114,10 @@ export class WebAgent {
   private stream: boolean;
   private dryRun: boolean;
   private maxRounds: number;
-  private customSystemPrompt?: string;
+  /** system prompt 注册表（key -> prompt 文本）。 */
+  private systemPromptRegistry = new Map<string, string>();
+  /** 受保护工具集合（默认工具）。 */
+  private protectedToolNames = new Set<string>();
 
   /** 多轮对话记忆开关 */
   private memory: boolean;
@@ -131,10 +143,15 @@ export class WebAgent {
     this.stream = options.stream ?? true;
     this.dryRun = options.dryRun ?? false;
     this.maxRounds = options.maxRounds ?? 40;
-    this.customSystemPrompt = options.systemPrompt;
     this.memory = options.memory ?? false;
     this.autoSnapshot = options.autoSnapshot ?? true;
     this.snapshotOptions = options.snapshotOptions ?? {};
+
+    if (typeof options.systemPrompt === "string") {
+      this.setSystemPrompt(options.systemPrompt);
+    } else if (options.systemPrompt && typeof options.systemPrompt === "object") {
+      this.setSystemPrompts(options.systemPrompt);
+    }
   }
 
   // ─── 工具管理 ───
@@ -146,11 +163,50 @@ export class WebAgent {
     this.registry.register(createPageInfoTool());
     this.registry.register(createWaitTool());
     this.registry.register(createEvaluateTool());
+
+    for (const name of WebAgent.DEFAULT_TOOL_NAMES) {
+      this.protectedToolNames.add(name);
+    }
   }
 
   /** 注册一个自定义工具 */
   registerTool(tool: ToolDefinition): void {
     this.registry.register(tool);
+  }
+
+  /**
+   * 删除一个已注册工具。
+   * - 默认内置工具（registerTools 注册）不允许删除
+   * - 返回 true 表示删除成功，false 表示不存在或受保护
+   */
+  removeTool(name: string): boolean {
+    if (this.protectedToolNames.has(name)) return false;
+    return this.registry.unregister(name);
+  }
+
+  /** 检查工具是否已注册。 */
+  hasTool(name: string): boolean {
+    return this.registry.has(name);
+  }
+
+  /** 获取当前所有已注册工具名。 */
+  getToolNames(): string[] {
+    return this.registry.getDefinitions().map(tool => tool.name);
+  }
+
+  /**
+   * 删除所有“非默认”工具。
+   * 返回值为本次被删除的工具名数组。
+   */
+  clearCustomTools(): string[] {
+    const removed: string[] = [];
+    for (const tool of this.registry.getDefinitions()) {
+      if (this.protectedToolNames.has(tool.name)) continue;
+      if (this.registry.unregister(tool.name)) {
+        removed.push(tool.name);
+      }
+    }
+    return removed;
   }
 
   /** 获取所有已注册的工具定义列表 */
@@ -200,9 +256,55 @@ export class WebAgent {
     this.dryRun = enabled;
   }
 
-  /** 设置自定义系统提示词 */
-  setSystemPrompt(prompt: string): void {
-    this.customSystemPrompt = prompt;
+  /**
+   * 注册系统提示词。
+   * - setSystemPrompt(prompt)：使用默认 key 注册
+   * - setSystemPrompt(key, prompt)：按指定 key 注册
+   */
+  setSystemPrompt(prompt: string): void;
+  setSystemPrompt(key: string, prompt: string): void;
+  setSystemPrompt(keyOrPrompt: string, maybePrompt?: string): void {
+    const key = maybePrompt === undefined
+      ? WebAgent.DEFAULT_SYSTEM_PROMPT_KEY
+      : keyOrPrompt.trim();
+    const prompt = maybePrompt === undefined ? keyOrPrompt : maybePrompt;
+
+    if (!key) throw new Error("system prompt 的 key 不能为空");
+    const value = prompt.trim();
+    if (!value) throw new Error("system prompt 不能为空");
+
+    this.systemPromptRegistry.set(key, value);
+  }
+
+  /** 批量注册系统提示词（key -> prompt）。 */
+  setSystemPrompts(prompts: Record<string, string>): void {
+    for (const [key, prompt] of Object.entries(prompts)) {
+      this.setSystemPrompt(key, prompt);
+    }
+  }
+
+  /** 注销指定 key 的系统提示词。 */
+  removeSystemPrompt(key: string): boolean {
+    return this.systemPromptRegistry.delete(key);
+  }
+
+  /** 只保留指定 key 的系统提示词，其余全部删除。 */
+  keepOnlySystemPrompt(key: string): boolean {
+    if (!this.systemPromptRegistry.has(key)) return false;
+    const value = this.systemPromptRegistry.get(key)!;
+    this.systemPromptRegistry.clear();
+    this.systemPromptRegistry.set(key, value);
+    return true;
+  }
+
+  /** 获取当前已注册的全部系统提示词（浅拷贝）。 */
+  getSystemPrompts(): Record<string, string> {
+    return Object.fromEntries(this.systemPromptRegistry.entries());
+  }
+
+  /** 删除全部系统提示词。 */
+  clearSystemPrompts(): void {
+    this.systemPromptRegistry.clear();
   }
 
   /** 开启或关闭多轮对话记忆 */
@@ -256,10 +358,14 @@ export class WebAgent {
     // 优先使用自定义 client，否则使用内置 createAIClient
     const client = this.client ?? this.createBuiltinClient();
 
-    // 复用 core/system-prompt 或使用自定义
-    let systemPrompt =
-      this.customSystemPrompt ??
-      buildSystemPrompt({ tools: this.registry.getDefinitions() });
+    // 先构建基础系统提示词，再追加已注册的 system prompt 扩展。
+    let systemPrompt = buildSystemPrompt({ tools: this.registry.getDefinitions() });
+    if (this.systemPromptRegistry.size > 0) {
+      const extensionText = Array.from(this.systemPromptRegistry.entries())
+        .map(([key, prompt]) => `- [${key}]\n${prompt}`)
+        .join("\n\n");
+      systemPrompt += `\n\n## Registered System Prompt Extensions\n${extensionText}`;
+    }
 
     // ─── 自动快照：注入 system prompt，不污染对话历史 ───
     // 创建本次对话的 RefStore，快照结束后保持活跃，对话结束后清空

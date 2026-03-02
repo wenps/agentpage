@@ -233,7 +233,7 @@ applyRouteSkill(location.pathname);
 | `baseURL` | `string` | - | 自定义 API 基础地址（用于代理/私有部署，覆盖 provider 默认端点） |
 | `stream` | `boolean` | `true` | 是否启用流式返回（SSE）；关闭后使用 JSON 非流式响应 |
 | `dryRun` | `boolean` | `false` | 干运行模式：仅输出 AI 计划调用的工具列表，不执行真实操作 |
-| `systemPrompt` | `string` | 内置 prompt | 用户自定义系统提示词（项目级/路由级），覆盖内置默认 prompt |
+| `systemPrompt` | `string \| Record<string, string>` | 内置 prompt | 系统提示词注册项：支持单条或 key-value 多条注册（会追加到内置 prompt） |
 | `maxRounds` | `number` | `40` | 单次 chat 最大循环轮次，超过后强制终止 |
 | `memory` | `boolean` | `false` | 是否开启多轮对话记忆（跨 chat 调用保留历史消息） |
 | `autoSnapshot` | `boolean` | `true` | chat 前是否自动生成首轮页面快照并注入 system prompt |
@@ -283,22 +283,35 @@ type AIClient = {
 | `anthropic` | `https://api.anthropic.com` | `claude-sonnet-4-20250514` | Anthropic 原生接口 |
 | `deepseek` | `https://api.deepseek.com` | `deepseek-chat` | DeepSeek 接口 |
 
-#### `systemPrompt`（自定义 Prompt）
+#### `systemPrompt`（Prompt 注册与维护）
 
-用户可以完全覆盖内置 system prompt，或在内置基础上追加约束：
+推荐使用“key-value 注册表”维护 Prompt：
 
 ```ts
-// 方式 1：完全自定义
+// 方式 1：初始化时注册单条（默认 key = default）
 const agent = new WebAgent({
   systemPrompt: "You are a deployment assistant. Only operate deploy-related UI.",
   // ...
 });
 
-// 方式 2：运行时按路由切换
-agent.setSystemPrompt("You are on the tickets page. Prioritize filtering and status updates.");
+// 方式 2：初始化时按 key 批量注册
+const routeAgent = new WebAgent({
+  systemPrompt: {
+    tickets: "You are on tickets page. Prioritize filtering and status updates.",
+    deploy: "You are on deploy page. Confirm risky actions before release.",
+  },
+});
+
+// 方式 3：运行时维护（新增/覆盖/删除/只保留）
+agent.setSystemPrompt("tickets", "You are on tickets page. Only operate ticket UI.");
+agent.setSystemPrompt("global prompt fallback"); // 写入默认 key: default
+agent.removeSystemPrompt("tickets");
+agent.keepOnlySystemPrompt("default");
+agent.clearSystemPrompts();
+console.log(agent.getSystemPrompts());
 ```
 
-内置 prompt 的核心规则包括：快照优先决策、任务增量消费（REMAINING 协议）、批量执行、禁止 page_info 空转等。
+内置 prompt 的核心规则包括：快照优先决策、任务增量消费（REMAINING 协议）、批量执行、禁止 page_info 空转等。注册表中的 Prompt 会作为扩展段追加到内置 prompt 之后。
 
 #### `dryRun`（干运行模式）
 
@@ -421,7 +434,13 @@ agent.clearHistory();                       // 手动清空历史
 | --- | --- | --- |
 | `registerTools()` | `(): void` | 注册全部 5 个内置工具（`dom/navigate/page_info/wait/evaluate`） |
 | `registerTool(tool)` | `(tool: ToolDefinition): void` | 注册单个自定义工具 |
+| `removeTool(name)` | `(name: string): boolean` | 删除工具；若是默认内置工具则返回 `false` |
+| `hasTool(name)` | `(name: string): boolean` | 检查工具是否已注册 |
+| `getToolNames()` | `(): string[]` | 获取当前已注册的工具名列表 |
+| `clearCustomTools()` | `(): string[]` | 删除全部自定义工具并返回被删除工具名；默认内置工具保留 |
 | `getTools()` | `(): ToolDefinition[]` | 获取当前已注册的工具定义列表 |
+
+> 默认内置工具保护：通过 `registerTools()` 注册的 `dom/navigate/page_info/wait/evaluate` 不允许删除。
 
 ```ts
 // 注册所有内置工具
@@ -440,6 +459,12 @@ agent.registerTool({
     return { content: `Ticket created: ${params.title}` };
   },
 });
+
+// 维护工具
+console.log(agent.hasTool("create_ticket"));
+console.log(agent.getToolNames());
+agent.removeTool("create_ticket");
+agent.clearCustomTools();
 ```
 
 ### 模型与执行配置
@@ -453,7 +478,13 @@ agent.registerTool({
 | `setStream(enabled)` | `(enabled: boolean): void` | 开关流式输出 |
 | `getStream()` | `(): boolean` | 获取流式状态 |
 | `setDryRun(enabled)` | `(enabled: boolean): void` | 开关干运行模式 |
-| `setSystemPrompt(prompt)` | `(prompt: string): void` | 设置自定义 Prompt |
+| `setSystemPrompt(prompt)` | `(prompt: string): void` | 以默认 key(`default`) 注册/覆盖一条 Prompt |
+| `setSystemPrompt(key, prompt)` | `(key: string, prompt: string): void` | 按 key 注册/覆盖一条 Prompt |
+| `setSystemPrompts(prompts)` | `(prompts: Record<string, string>): void` | 批量注册 Prompt |
+| `removeSystemPrompt(key)` | `(key: string): boolean` | 删除指定 key 的 Prompt |
+| `keepOnlySystemPrompt(key)` | `(key: string): boolean` | 仅保留指定 key 的 Prompt |
+| `getSystemPrompts()` | `(): Record<string, string>` | 获取全部已注册 Prompt（浅拷贝） |
+| `clearSystemPrompts()` | `(): void` | 清空全部已注册 Prompt |
 | `setMemory(enabled)` | `(enabled: boolean): void` | 开关多轮记忆（关闭时自动清空历史） |
 | `getMemory()` | `(): boolean` | 获取记忆状态 |
 | `clearHistory()` | `(): void` | 清空对话历史（不影响记忆开关） |

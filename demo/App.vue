@@ -197,7 +197,7 @@
                   <el-button type="danger" size="small" @click="onDeleteSelected">删除选中</el-button>
                 </div>
                 <el-table
-                  :data="filteredTableData"
+                  :data="paginatedTableData"
                   stripe
                   border
                   style="width: 100%"
@@ -220,9 +220,9 @@
                     </template>
                   </el-table-column>
                   <el-table-column label="操作" width="180" fixed="right">
-                    <template #default="{ row, $index }">
+                    <template #default="{ row }">
                       <el-button size="small" @click="onEditRow(row)">编辑</el-button>
-                      <el-button size="small" type="danger" @click="onRemoveRow($index)">删除</el-button>
+                      <el-button size="small" type="danger" @click="onRemoveRow(row)">删除</el-button>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -230,7 +230,7 @@
                   v-model:current-page="pagination.page"
                   v-model:page-size="pagination.pageSize"
                   :page-sizes="[5, 10, 20]"
-                  :total="tableData.length"
+                  :total="filteredTableData.length"
                   layout="total, sizes, prev, pager, next, jumper"
                   style="margin-top: 12px; justify-content: flex-end"
                 />
@@ -717,7 +717,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, nextTick, onMounted } from 'vue'
+import { ref, computed, reactive, nextTick, onMounted, watch } from 'vue'
 import { ElMessage, ElNotification, ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { WebAgent } from '../src/web/index.js'
@@ -732,6 +732,11 @@ const agent = new WebAgent({
   stream: true,
 })
 agent.registerTools()
+agent.setSystemPrompt('demo', [
+  'You are operating the Element Plus demo page.',
+  'Prefer minimal action arrays and complete independent visible actions in one round.',
+  'Do not repeat verification calls unless the user explicitly asks for verification.',
+].join(' '))
 
 // ===== 连接状态 =====
 const connected = ref(false)
@@ -812,7 +817,7 @@ const transferData = Array.from({ length: 15 }, (_, i) => ({
 const tableSearch = ref('')
 const selectedRows = ref<any[]>([])
 const pagination = reactive({ page: 1, pageSize: 10 })
-const tableData = ref([
+const tableSeeds = [
   { name: '张三', age: 28, email: 'zhangsan@test.com', city: '北京', status: '活跃' },
   { name: '李四', age: 35, email: 'lisi@test.com', city: '上海', status: '离线' },
   { name: '王五', age: 22, email: 'wangwu@test.com', city: '广州', status: '活跃' },
@@ -821,11 +826,44 @@ const tableData = ref([
   { name: '孙八', age: 40, email: 'sunba@test.com', city: '成都', status: '活跃' },
   { name: '周九', age: 33, email: 'zhoujiu@test.com', city: '南京', status: '离线' },
   { name: '吴十', age: 29, email: 'wushi@test.com', city: '武汉', status: '活跃' },
-])
+] as const
+
+const tableData = ref(
+  Array.from({ length: 300 }, (_, i) => {
+    const seed = tableSeeds[i % tableSeeds.length]
+    return {
+      name: `${seed.name}${Math.floor(i / tableSeeds.length) + 1}`,
+      age: Math.min(60, Math.max(18, seed.age + ((i % 5) - 2))),
+      email: `${seed.email.replace('@', `+${i + 1}@`)}`,
+      city: seed.city,
+      status: i % 3 === 0 ? '离线' : '活跃',
+    }
+  }),
+)
 const filteredTableData = computed(() => {
   if (!tableSearch.value) return tableData.value
   return tableData.value.filter(r => r.name.includes(tableSearch.value))
 })
+
+const paginatedTableData = computed(() => {
+  const start = (pagination.page - 1) * pagination.pageSize
+  const end = start + pagination.pageSize
+  return filteredTableData.value.slice(start, end)
+})
+
+watch(tableSearch, () => {
+  pagination.page = 1
+})
+
+watch(
+  () => [filteredTableData.value.length, pagination.pageSize],
+  () => {
+    const maxPage = Math.max(1, Math.ceil(filteredTableData.value.length / pagination.pageSize))
+    if (pagination.page > maxPage) {
+      pagination.page = maxPage
+    }
+  },
+)
 
 // ===== 动态标签 =====
 const dynamicTags = ref(['标签一', '标签二', '标签三'])
@@ -1028,7 +1066,9 @@ function onEditRow(row: any) {
   }).catch(() => {})
 }
 
-function onRemoveRow(index: number) {
+function onRemoveRow(row: any) {
+  const index = tableData.value.indexOf(row)
+  if (index === -1) return
   tableData.value.splice(index, 1)
   ElMessage.success('已删除')
 }
