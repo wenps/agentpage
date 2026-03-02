@@ -1,6 +1,6 @@
 {
   "name": "agentpage",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "description": "Embeddable AI Agent SDK for browsers — let AI operate your web pages via tool-calling",
   "keywords": [
     "ai",
@@ -34,7 +34,8 @@
     "lint": "oxlint",
     "format": "oxfmt --write",
     "format:check": "oxfmt --check",
-    "demo": "vite --config vite.demo.config.ts",
+    "demo": "pnpm --dir demo dev",
+    "demo:install": "pnpm --dir demo install",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -42,16 +43,12 @@
     "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
-    "@element-plus/icons-vue": "^2.3.2",
     "@types/chrome": "^0.1.36",
-    "@vitejs/plugin-vue": "^6.0.4",
-    "element-plus": "^2.13.2",
     "oxfmt": "^0.32.0",
     "oxlint": "^1.47.0",
     "tsdown": "^0.20.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.0.18",
-    "vue": "^3.5.29"
+    "vitest": "^4.0.18"
   }
 }
