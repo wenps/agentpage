@@ -40,12 +40,16 @@ import type { AIClient } from "../core/types.js";
 import { ToolRegistry, type ToolDefinition } from "../core/tool-registry.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { generateSnapshot, type SnapshotOptions } from "./tools/page-info-tool.js";
-import { createDomTool, setActiveRefStore } from "./tools/dom-tool.js";
+import { createDomTool, setActiveRefStore } from "./tools/dom-tool/index.js";
 import { createNavigateTool } from "./tools/navigate-tool.js";
 import { createPageInfoTool } from "./tools/page-info-tool.js";
 import { createWaitTool } from "./tools/wait-tool.js";
 import { createEvaluateTool } from "./tools/evaluate-tool.js";
 import { RefStore } from "./ref-store.js";
+import { installEventListenerTracking } from "./event-listener-tracker.js";
+
+// 默认在 web 入口加载时安装监听追踪，尽量覆盖页面早期事件绑定
+installEventListenerTracking();
 
 // ─── 回调类型 ───
 
@@ -470,7 +474,7 @@ export {
   generateSnapshot,
   type SnapshotOptions,
 } from "./tools/page-info-tool.js";
-export { createDomTool } from "./tools/dom-tool.js";
+export { createDomTool } from "./tools/dom-tool/index.js";
 export { createNavigateTool } from "./tools/navigate-tool.js";
 export { createPageInfoTool } from "./tools/page-info-tool.js";
 export { createWaitTool } from "./tools/wait-tool.js";

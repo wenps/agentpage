@@ -45,6 +45,7 @@ src/
 │       └── sse.ts
 └── web/
   ├── index.ts
+  ├── event-listener-tracker.ts  # 全局事件监听追踪（WeakMap<Element, Set<string>>）
   ├── dom-tool.ts          # 兼容转发层（re-export）
   ├── navigate-tool.ts     # 兼容转发层（re-export）
   ├── page-info-tool.ts    # 兼容转发层（re-export）
@@ -53,7 +54,14 @@ src/
   ├── ref-store.ts
   ├── messaging.ts
   └── tools/
-    ├── dom-tool.ts
+    ├── dom-tool/
+    │   ├── index.ts          # createDomTool 入口 + schema + execute 路由
+    │   ├── constants.ts       # 常量（DEFAULT_WAIT_MS, KEY_CODE_MAP 等）
+    │   ├── query.ts           # 元素查找、RefStore 管理、describeElement
+    │   ├── actionability.ts   # 可操作性检查（可见/禁用/可编辑/稳定/命中）
+    │   ├── events.ts          # 事件派发（click/hover/input 链、键盘 press）
+    │   ├── resolve.ts         # 目标解析（retarget、checkable/editable 穿透、ARIA widget→input 穿透）
+    │   └── dropdown.ts        # 自定义下拉增强（findVisibleOptionByText）
     ├── navigate-tool.ts
     ├── page-info-tool.ts
     ├── wait-tool.ts
@@ -107,7 +115,8 @@ src/
   - `REMAINING: DONE`（当前文本任务已消费完）
 
 补充（当前实现）：
-- Round 0 使用原始任务作为起点；Round 1+ 不再重复注入原始 userMessage，避免“回头重做”。
+- Round 0 使用原始任务作为起点；Round 1+ 以 `remaining` 驱动，不重复用原始 userMessage 作为主指令。
+- Round 1+ 若 `remaining` 已被缩减（与原始任务不同），会注入 `Master goal (reference only)` 锚点，防止模型任务漂移。
 - 模型在 `tool_calls` 轮可能返回空 `content`，不可视为完成。
 - `REMAINING` 缺失且本轮有执行动作时：按线性任务剔除做启发式推进。
 - `REMAINING` 缺失且本轮无执行进展时：保持 remaining 不推进。
@@ -153,8 +162,19 @@ src/
 - `dom.select_option`：支持 `value/label/index` 多策略选择；结果中显式返回 `value + label`。
 - `dom.fill`：限制不适用于 `checkbox/radio/file/button/submit/reset`，避免错误动作。
 - `wait.wait_for_selector`：支持 `state=attached|visible|hidden|detached`（默认 `attached`）。
-- 快照增强运行态：`select val`、`option selected`、`checked`、`disabled`、`readonly` 可见。
+- 快照增强运行态：`select val`、`option selected`、`checked`、`disabled`、`readonly`、`listeners="..."` 可见。
 - 快照增强结构语义：布局折叠后可通过括号分组块（`collapsed-group`）看出被提升节点之间的来源关联。
+- `dom.fill` 对 `role=slider` / `role=spinbutton` 等 ARIA widget 元素自动穿透到关联 `<input>`，无需框架特定类名。
+
+### 4.6 System Prompt 架构（Decision Framework）
+
+当前 `system-prompt.ts` 采用 Decision Framework 结构，不再逐条罗列规则：
+
+- **Decision Flow**：ANALYZE snapshot → ASSESS targets → CHOOSE action → EXECUTE → OUTPUT
+- **Targeting Rules**：hash selector 优先、ordinal 为 1-based 视觉序
+- **Constraints**：form-input 顺序约束（focus/click → fill/type/select_option）、DOM 结构变化后断轮
+- **Listener Abbreviations**：`clk` / `inp` / `chg` / `kdn` / `kup` 等缩写映射
+- **工具描述去重**：工具部分完全由各工具的 `t.description` 动态注入，prompt 正文不再重复工具能力描述
 
 ## 5. 模块职责细化
 
@@ -199,8 +219,14 @@ src/
 ### web
 
 - `index.ts`：WebAgent 对外 API，负责配置、记忆、autoSnapshot、callbacks
-- `tools/*.ts`：工具实现主文件（DOM/导航/信息/等待/执行）
-- `tools/dom-tool.ts`：对齐 Playwright 常见交互语义（事件链、select_option 多策略、fill 目标约束）
+- `tools/dom-tool/`：DOM 操作工具文件夹，对齐 Playwright 常见交互语义
+  - `index.ts`：createDomTool 入口，schema 定义 + execute 路由
+  - `constants.ts`：共享常量（等待时间、键码映射、输入类型白名单）
+  - `query.ts`：元素查找（hash/CSS/复合选择器）、RefStore 管理、describeElement
+  - `actionability.ts`：可操作性检查（可见/禁用/可编辑/稳定/命中目标）
+  - `events.ts`：事件派发（click/hover/input 完整事件链、键盘 press）
+  - `resolve.ts`：目标解析（retarget、checkable/pointer/formItem/editable 穿透、ARIA widget→input 穿透）
+  - `dropdown.ts`：自定义下拉增强（findVisibleOptionByText、waitForDropdownPopup）
 - `tools/wait-tool.ts`：支持 selector state 等待语义（attached/visible/hidden/detached）
 - `tools/page-info-tool.ts`：快照输出运行态字段（selected/checked/disabled/readonly）
 - `dom-tool.ts` / `navigate-tool.ts` / `page-info-tool.ts` / `wait-tool.ts` / `evaluate-tool.ts`：兼容转发层，避免外部导入路径断裂

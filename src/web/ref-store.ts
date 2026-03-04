@@ -84,6 +84,31 @@ export class RefStore {
     return this.map.has(id);
   }
 
+  /** 删除指定 hash ID 映射，返回是否删除成功。 */
+  delete(id: string): boolean {
+    return this.map.delete(id);
+  }
+
+  /**
+   * 清理失效引用：
+   * - 仅保留 keepIds 中的映射（若提供）
+   * - 自动移除已脱离文档（isConnected=false）的元素
+   *
+   * @returns 被移除的映射数量
+   */
+  prune(keepIds?: ReadonlySet<string>): number {
+    let removed = 0;
+    for (const [id, el] of this.map.entries()) {
+      const shouldKeepById = keepIds ? keepIds.has(id) : true;
+      const isConnected = (el as Node).isConnected;
+      if (!shouldKeepById || !isConnected) {
+        this.map.delete(id);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   /** 清空所有映射 */
   clear(): void {
     this.map.clear();

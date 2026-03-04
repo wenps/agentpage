@@ -48,6 +48,9 @@ Agent Loop 是一个“快照驱动的增量执行循环”：
 
 - 先剥离 system prompt 里的历史快照（避免重复注入）
 - 使用 `buildCompactMessages()` 构建本轮上下文
+  - Round 0：原始任务 + remaining + 快照
+  - Round 1+：已完成步骤 + Master goal 锚点（仅当 remaining ≠ 原始任务时）+ remaining + 快照
+  - Master goal 锚点标注 `reference only`，防止模型回头重做，同时避免任务漂移
 - 若处于“元素未找到重试流”，额外注入 retry context
 
 ### 阶段 C：调用模型并解析协议

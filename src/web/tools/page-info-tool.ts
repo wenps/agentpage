@@ -15,7 +15,8 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
 import type { RefStore } from "../ref-store.js";
-import { getActiveRefStore } from "./dom-tool.js";
+import { getTrackedElementEvents, hasTrackedElementEvents } from "../event-listener-tracker.js";
+import { getActiveRefStore } from "./dom-tool/index.js";
 
 /** 快照配置选项 */
 export type SnapshotOptions = {
@@ -65,6 +66,31 @@ const MAX_SNAPSHOT_ATTR_VALUE_LENGTH = 120;
 const MAX_EXPANDED_LIST_CHILDREN = 120;
 /** 定向放宽 children 的硬上限。 */
 const MAX_EXPANDED_CHILDREN_LIMIT = 300;
+
+/**
+ * 事件名 → 快照简写映射。
+ * 目的：大幅压缩 listeners="..." 占用的 token，同时保留可读性。
+ * 简写规则在 system-prompt 中向模型说明。
+ */
+const EVENT_ABBREV: Record<string, string> = {
+  click: "clk", dblclick: "dbl",
+  mousedown: "mdn", mouseup: "mup", mousemove: "mmv",
+  mouseover: "mov", mouseout: "mot", mouseenter: "men", mouseleave: "mlv",
+  pointerdown: "pdn", pointerup: "pup", pointermove: "pmv",
+  pointerenter: "pen", pointerleave: "plv",
+  touchstart: "tst", touchend: "ted", touchmove: "tmv",
+  keydown: "kdn", keyup: "kup", keypress: "kpr",
+  input: "inp", change: "chg", submit: "sub",
+  focus: "fcs", blur: "blr",
+  scroll: "scl", wheel: "whl",
+  drag: "drg", dragstart: "drs", dragend: "dre", drop: "drp",
+  contextmenu: "ctx", resize: "rsz",
+};
+
+/** 将完整事件名转为快照简写（未收录的取前 3 字符）。 */
+function abbrevEvent(name: string): string {
+  return EVENT_ABBREV[name] ?? name.slice(0, 3);
+}
 
 /**
  * 规整快照属性值，避免把长 base64/data URL 原样注入快照。
@@ -144,6 +170,7 @@ export function generateSnapshot(
 
   let emittedNodes = 0;
   let truncatedByNodeBudget = false;
+  const emittedRefIds = new Set<string>();
 
   const refStore = opts.refStore;
 
@@ -163,11 +190,19 @@ export function generateSnapshot(
 
   const INTERACTIVE_ATTRS = [
     "href", "type", "placeholder", "value", "name", "role", "aria-label",
+    "aria-valuenow", "aria-valuemin", "aria-valuemax",
     "src", "alt", "title", "for", "action", "method",
   ];
 
   const INTERACTIVE_TAGS = new Set([
     "A", "BUTTON", "INPUT", "TEXTAREA", "SELECT", "OPTION", "LABEL", "SUMMARY",
+  ]);
+
+  /** 常见可交互事件（用于提升元素交互优先级）。 */
+  const INTERACTIVE_EVENTS = new Set([
+    "click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup",
+    "touchstart", "touchend", "input", "change", "keydown", "keyup", "keypress",
+    "submit", "focus", "blur",
   ]);
 
   /** 布尔状态属性 — 只在存在时输出（无值），如 disabled、checked */
@@ -225,9 +260,17 @@ export function generateSnapshot(
     for (const attr of Array.from(el.attributes)) {
       if (attr.name.startsWith("on")) return false;
     }
+    // 绑定过事件的容器也可能是交互入口（如委托点击）
+    if (hasTrackedElementEvents(el)) return false;
     // 有直接文本内容的元素有意义
     if (directText) return false;
     return true;
+  }
+
+  function hasInteractiveTrackedEvents(el: Element): boolean {
+    const trackedEvents = getTrackedElementEvents(el);
+    if (trackedEvents.length === 0) return false;
+    return trackedEvents.some(eventName => INTERACTIVE_EVENTS.has(eventName));
   }
 
   function isInteractiveElement(el: Element): boolean {
@@ -236,6 +279,7 @@ export function generateSnapshot(
     if (el.hasAttribute("role")) return true;
     if (el.hasAttribute("tabindex")) return true;
     if (el.hasAttribute("aria-label")) return true;
+    if (hasInteractiveTrackedEvents(el)) return true;
     return false;
   }
 
@@ -342,6 +386,14 @@ export function generateSnapshot(
     // 5. 事件绑定 — 只标记有 onclick（最重要的交互信号）
     if (el.hasAttribute("onclick")) attrs.push("onclick");
 
+    // 5.1 addEventListener 追踪到的事件绑定（使用简写压缩 token）
+    const trackedEvents = getTrackedElementEvents(el);
+    if (trackedEvents.length > 0) {
+      const preview = trackedEvents.slice(0, 6).map(abbrevEvent).join(",");
+      const suffix = trackedEvents.length > 6 ? ",..." : "";
+      attrs.push(`listeners="${preview}${suffix}"`);
+    }
+
     // 6. data-* 属性 — 只保留 data-testid（自动化测试定位用）
     const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
     if (testId) {
@@ -434,6 +486,7 @@ export function generateSnapshot(
     // 使用 hash ID（如 #a1b2c）或回退到完整 XPath
     if (hashId) {
       line += ` #${hashId}`;
+      emittedRefIds.add(hashId);
     } else {
       line += ` ref="${currentPath}"`;
     }
@@ -465,6 +518,8 @@ export function generateSnapshot(
   // 根元素自身的标签作为路径起点，walk 内部不再重复追加
   // 例如 root=body 时，parentPath=""，walk 中 currentPath="/body"
   const output = walk(root, 0, "") || "(空页面)";
+  // 快照完成后清理无效引用：移除本轮未输出和已失联元素
+  refStore?.prune(emittedRefIds);
   if (!truncatedByNodeBudget) return output;
   return `${output}\n... (snapshot truncated: maxNodes=${maxNodes})`;
 }

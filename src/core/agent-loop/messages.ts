@@ -274,13 +274,32 @@ export function buildCompactMessages(
 
   // 第 2 条 user 消息：执行上下文 + 协议约束 + 最新快照
   const hasErrors = trace.some(e => hasToolError(e.result));
+
+  // 判断 remaining 是否已经偏离原始任务文本（需要注入锚点）
+  const needsMasterGoalAnchor =
+    activeInstruction.trim().toLowerCase() !== userMessage.trim().toLowerCase();
+
   const contextParts: string[] = [
     // 执行上下文语义：
     // - 当前 remaining 是唯一待消费目标
+    // - Master goal 锚点防止任务漂移（仅当 remaining ≠ 原始任务时注入）
     // - 已完成步骤不重复
     // - 必须基于最新快照决策，不猜测未来 DOM
     // - 要求模型继续输出 REMAINING 协议
     "## Execution context",
+  ];
+
+  // Master goal 锚点：让模型随时能对照原始目标，防止 remaining 偏离后无法自我纠偏。
+  // 仅在 remaining 已被缩减（与原始任务不同）时注入，避免首轮重复。
+  if (needsMasterGoalAnchor) {
+    contextParts.push(
+      `Master goal (reference only — do NOT restart from scratch):`,
+      userMessage,
+      "",
+    );
+  }
+
+  contextParts.push(
     "Current remaining instruction:",
     activeInstruction,
     "",
@@ -300,7 +319,7 @@ export function buildCompactMessages(
     allowAgentUiInteraction
       ? "User explicitly asked to operate AutoPilot UI. You may interact with chat input/send/dock only as requested."
       : "Do NOT interact with any AI chat UI elements (chat input, send button, dock). Only operate on the actual page content.",
-  ];
+  );
 
   if (hasErrors) {
     contextParts.push(

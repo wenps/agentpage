@@ -10,7 +10,7 @@
  */
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
-import { getActiveRefStore } from "./dom-tool.js";
+import { getActiveRefStore } from "./dom-tool/index.js";
 
 /** 解析 selector（支持 RefStore hash ID 和 CSS 选择器） */
 function resolveElement(selector: string): Element | null {

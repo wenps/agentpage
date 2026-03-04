@@ -360,7 +360,9 @@ describe("executeAgentLoop golden paths", () => {
           const contextPayload = String(messages[messages.length - 1]?.content ?? "");
           expect(contextPayload).toContain("Current remaining instruction:");
           expect(contextPayload).toContain("发送");
-          expect(contextPayload).not.toContain("输入框输入 abc 然后发送");
+          // Master goal 锚点应存在（防止任务漂移），但标注为 reference only
+          expect(contextPayload).toContain("Master goal (reference only");
+          expect(contextPayload).toContain("输入框输入 abc 然后发送");
           expect(contextPayload).toContain("Previous round model output (normalized");
           expect(contextPayload).toContain("REMAINING: 发送");
         },

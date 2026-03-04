@@ -177,6 +177,23 @@ console.log(result.reply);
 pnpm demo
 ```
 
+### Demo Prompt 建议（Element Plus）
+
+在 `demo/App.vue` 中，推荐为 Demo 场景单独注册一条 prompt（key: `demo`），以减少无效调用和重复验证：
+
+```ts
+agent.setSystemPrompt("demo", [
+  "You are operating the Element Plus demo page.",
+  "Prefer minimal action arrays and complete independent visible actions in one round.",
+  "Do not repeat verification calls unless the user explicitly asks for verification.",
+].join(" "));
+```
+
+这三条规则分别约束：
+- 最小化动作数组，减少冗余工具调用。
+- 同一轮优先完成当前可见且彼此独立的动作，提升收敛速度。
+- 非用户明确要求时，不重复做验证型调用，避免空转。
+
 ### 按路由构建 AI Skill（推荐范式）
 
 ```ts
@@ -370,6 +387,25 @@ agent.clearHistory();                       // 手动清空历史
 | `maxChildren` | `number` | `30`（chat 首轮）/ `25`（page_info.snapshot） | 每个父节点最多保留的子元素数量 |
 | `maxTextLength` | `number` | `40` | 单节点文本截断长度（字符数） |
 | `refStore` | `RefStore` | 自动创建 | hash ID 映射表（一般无需手动传入，WebAgent 自动管理） |
+
+### 全局事件监听追踪（默认开启）
+
+从 `0.0.26` 开始，`web` 入口会在模块加载时默认安装全局监听追踪补丁：
+
+- 劫持 `EventTarget.prototype.addEventListener/removeEventListener`
+- 先执行原生调用，再记录事件（不阻断业务逻辑）
+- 仅记录 `Element` 目标，使用 `WeakMap<Element, Set<string>>`
+
+快照侧联动：
+
+- `page_info.snapshot` 会为命中事件追踪的元素输出 `listeners="click,input,..."`
+- 交互优先级识别会把运行时监听事件纳入判断（不仅依赖 `onclick/role` 等静态属性）
+- 智能剪枝会保留带事件绑定的容器，避免把委托交互入口错误折叠
+
+边界说明：
+
+- 事件委托场景只能记录到父容器（这是浏览器事件机制本身决定的）
+- 补丁安装前已绑定的历史监听不会被回溯记录；建议尽早初始化 `WebAgent`
 
 ### 快照参数详细说明
 
@@ -971,6 +1007,7 @@ src/
 │       └── sse.ts
 └── web/
   ├── index.ts
+  ├── event-listener-tracker.ts  # 全局事件监听追踪（WeakMap<Element, Set<string>>）
   ├── dom-tool.ts          # 兼容转发层（re-export）
   ├── navigate-tool.ts     # 兼容转发层（re-export）
   ├── page-info-tool.ts    # 兼容转发层（re-export）
@@ -979,7 +1016,14 @@ src/
   ├── ref-store.ts
   ├── messaging.ts
   └── tools/
-    ├── dom-tool.ts
+    ├── dom-tool/
+    │   ├── index.ts          # createDomTool 入口 + schema + execute 路由
+    │   ├── constants.ts       # 常量（DEFAULT_WAIT_MS, KEY_CODE_MAP 等）
+    │   ├── query.ts           # 元素查找、RefStore 管理、describeElement
+    │   ├── actionability.ts   # 可操作性检查（可见/禁用/可编辑/稳定/命中）
+    │   ├── events.ts          # 事件派发（click/hover/input 链、键盘 press）
+    │   ├── resolve.ts         # 目标解析（retarget、checkable/editable 穿透、ARIA widget→input 穿透）
+    │   └── dropdown.ts        # 自定义下拉增强（findVisibleOptionByText）
     ├── navigate-tool.ts
     ├── page-info-tool.ts
     ├── wait-tool.ts
@@ -1153,13 +1197,13 @@ loop 对本轮返回做以下处理：
 
 ### A. System Prompt（全局规则层）
 
-由 `src/core/system-prompt.ts` 生成，职责是定义不可变执行约束：
+由 `src/core/system-prompt.ts` 生成，采用 Decision Framework 架构：
 
-- 从当前快照直接执行，不复述任务
-- 任务按“剔除模型”推进（current + previous + this-round -> new remaining）
-- 禁止 `page_info` 作为规划手段
-- 可见目标尽量同轮批量执行
-- DOM 会变化的动作执行后在下一轮继续
+- 五阶段决策流：ANALYZE → ASSESS → CHOOSE → EXECUTE → OUTPUT
+- Targeting Rules：hash selector 优先、ordinal 1-based 视觉序
+- Constraints：form-input 顺序、DOM 变化断轮、禁止冗余 page_info
+- Listener Abbreviations：快照中缩写到原始事件的映射
+- 工具部分由各工具 `t.description` 动态注入，不在 prompt 正文重复
 - 统一输出 `REMAINING` 协议
 
 ### B. Round Messages（轮次状态层）
@@ -1604,7 +1648,7 @@ agent.registerTool({
 
 ### 6. Tools 能力总表（详细）
 
-#### 6.1 `dom` 工具（`src/web/tools/dom-tool.ts`）
+#### 6.1 `dom` 工具（`src/web/tools/dom-tool/`）
 
 支持动作：
 
@@ -1713,34 +1757,36 @@ agent.registerTool({
 
 1. **System Prompt（稳定规则层）**
   - 由 `buildSystemPrompt()` 生成
-  - 永久规则：快照优先、批处理、输入顺序、禁止 page_info、REMAINING 协议
+  - 采用 Decision Framework 架构：ANALYZE → ASSESS → CHOOSE → EXECUTE → OUTPUT
+  - 包含 Targeting Rules、Constraints、Listener Abbreviations
+  - 工具部分由各工具 `t.description` 动态注入，prompt 不重复工具能力描述
 2. **Round Message（动态状态层）**
   - 由 `buildCompactMessages()` 生成
-  - 包含当前 remaining、done steps、上轮计划、上轮输出归一化、最新快照
+  - 包含当前 remaining、Master goal 锚点（防漂移）、done steps、上轮计划、上轮输出归一化、最新快照
 3. **Recovery Context（修复层）**
   - Not-found retry context
   - Protocol violation hint
 
 #### 7.2 System Prompt 的关键规则（当前实现）
 
-`buildSystemPrompt()` 中的核心约束（英文原文语义）：
+`buildSystemPrompt()` 采用 Decision Framework 架构，不再逐条罗列规则：
 
-- 从“当前快照 + 当前 remaining”直接执行，不复述任务
-- 每轮按 task reduction 推进
-- 使用 hash selector，不猜 CSS
-- 可见且互不依赖的动作同轮批量执行
-- 输入顺序强约束：`focus/click -> fill/type/select_option`
-- 多字段交替对执行（防止 focus-only 空轮）
-- DOM 结构变化动作后断轮
-- 禁用 `page_info` 作为规划手段
-- 输出 `REMAINING: ...` 或 `REMAINING: DONE`
+- 五阶段决策流：ANALYZE snapshot → ASSESS targets → CHOOSE action → EXECUTE → OUTPUT
+- Targeting Rules：hash selector 优先、ordinal 为 1-based 视觉序
+- Constraints：form-input 顺序约束（focus/click → fill/type/select_option）、DOM 结构变化后断轮
+- Listener Abbreviations：`clk`/`inp`/`chg`/`kdn`/`kup` 等缩写映射
+- 工具描述去重：工具部分完全由各工具 `t.description` 动态注入，prompt 不再重复
+- 统一输出 `REMAINING: <text>` 或 `REMAINING: DONE`
 
 #### 7.3 Round 0 与 Round 1+ 差异
 
 - Round 0：原始任务 + 首轮快照
-- Round 1+：不再重复原始用户输入，改为“remaining 驱动”
+- Round 1+：以 remaining 驱动；当 remaining 与原始任务不同时，注入 `Master goal (reference only)` 锚点
 
-这能显著降低“回头重做”的概率。
+Master goal 锚点的设计目的：
+- 防止 remaining 因模型错误缩减而偏离原始目标（任务漂移）
+- 标注 `reference only — do NOT restart from scratch`，避免模型回头重做
+- 让模型能随时交叉校验当前行动是否符合原始意图
 
 #### 7.4 显式 UI 意图判定
 

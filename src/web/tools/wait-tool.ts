@@ -13,7 +13,7 @@
  */
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
-import { getActiveRefStore } from "./dom-tool.js";
+import { getActiveRefStore } from "./dom-tool/index.js";
 
 const DEFAULT_TIMEOUT = 6_000;
 const POLL_INTERVAL_MS = 80;
@@ -76,7 +76,14 @@ function resolveSelector(selector: string): Element | null {
     const store = getActiveRefStore();
     if (store) {
       const id = selector.slice(1);
-      if (store.has(id)) return store.get(id) ?? null;
+      if (store.has(id)) {
+        const el = store.get(id);
+        if (!el || !el.isConnected) {
+          store.delete(id);
+          return null;
+        }
+        return el;
+      }
     }
   }
   try { return document.querySelector(selector); } catch { return null; }

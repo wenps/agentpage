@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.0.27
+
+### 新增
+
+- Round 1+ 消息注入 Master goal 锚点（防任务漂移）：
+  - 当 `remaining` 与原始任务不同时，注入 `Master goal (reference only — do NOT restart from scratch)`
+  - 让模型随时能交叉校验当前行动是否符合原始意图，避免 remaining 被错误缩减后完全偏离目标
+  - 标注 `reference only` 语义，防止模型回头从头重做
+
+### 变更
+
+- `system-prompt.ts` Constraints 新增反漂移规则：
+  - "Always cross-check your planned actions against the Master goal to avoid task drift"
+
+### 测试
+
+- 更新"缺失 REMAINING 协议且本轮有执行动作"测试用例：
+  - 断言 Round 1+ 消息包含 `Master goal (reference only` 锚点
+  - 移除旧的"不包含原始任务"断言（该行为已变更为有条件注入）
+
+## 0.0.26
+
+### 新增
+
+- `dom-tool` 单文件（960 行）拆分为模块文件夹 `src/web/tools/dom-tool/`：
+  - `index.ts`：入口 + schema + execute 路由
+  - `constants.ts`：共享常量（等待时间、键码映射、输入类型白名单）
+  - `query.ts`：元素查找（hash/CSS/复合选择器）、RefStore 管理、describeElement
+  - `actionability.ts`：可操作性检查（可见/禁用/可编辑/稳定/命中）
+  - `events.ts`：事件派发（click/hover/input 完整事件链、键盘 press）
+  - `resolve.ts`：目标解析（retarget、checkable/pointer/formItem/editable 穿透）
+  - `dropdown.ts`：自定义下拉增强（findVisibleOptionByText、waitForDropdownPopup）
+- `resolve.ts` 新增通用 ARIA widget → input 穿透策略：
+  - 支持 `role=slider` / `role=spinbutton` 元素向上遍历（最多 5 层）查找关联 `<input>`
+  - 无硬编码框架类名，适用于 Element Plus / AntD / 原生等任意实现
+- 新增浏览器端全局事件监听追踪器：
+  - 通过 `EventTarget.prototype.addEventListener/removeEventListener` 统一记录事件绑定
+  - 仅记录 `Element` 目标，使用 `WeakMap<Element, Set<string>>` 存储
+  - 在 `web` 入口默认安装（模块加载即生效），尽量覆盖早期绑定
+- 快照交互增强：
+  - `page_info.snapshot` 增加 `listeners="..."` 输出字段，暴露运行时事件绑定
+  - 交互优先级判定接入追踪事件（如 `click/input/change/keydown`）
+  - 布局剪枝时，带事件绑定的容器不再被误折叠
+- `RefStore` 新增引用维护能力：
+  - 新增 `delete(id)`
+  - 新增 `prune(keepIds)`，用于批量清理未保留和失联引用
+
+### 变更
+
+- `system-prompt.ts` 重写为 Decision Framework 架构：
+  - 决策流程：ANALYZE snapshot → ASSESS targets → CHOOSE action → EXECUTE → OUTPUT
+  - 新增 Targeting Rules（hash selector、ordinal 视觉稳定序）
+  - 新增 Constraints（form-input 顺序、DOM 变化断轮）
+  - 新增 Listener Abbreviations 映射（`clk` / `inp` / `chg` 等）
+  - 工具描述部分完全由各工具 `t.description` 动态注入，prompt 不再重复
+- `dom-tool` 工具描述精简（10 行 → 3 行）：
+  - 移除与 system prompt 重复的决策指导内容
+  - 仅保留能力枚举（actions / fill auto-resolve / check-uncheck / press / scroll）
+  - ordinal 规则迁移至 system prompt Targeting Rules
+- 快照收敛后新增引用清理流程：
+  - `generateSnapshot()` 在完成输出后执行 `refStore.prune(emittedRefIds)`
+  - 自动移除本轮未出现在快照中的 ref 与已失联（`isConnected=false`）元素映射
+- `dom-tool` / `wait-tool` 的 `#ref` 解析逻辑增强：
+  - 命中映射但元素失联时立即删除脏引用，避免后续重复命中无效 ref
+
+### 测试
+
+- 新增 `src/web/event-listener-tracker.test.ts`：覆盖事件追踪 add/remove 与非 Element 目标过滤。
+- 新增 `src/web/ref-store.test.ts`：覆盖 `delete` 与 `prune` 清理行为。
+
+### 文档
+
+- `README.md` 新增 Demo Prompt 建议（Element Plus），同步 `demo/App.vue` 的 `setSystemPrompt('demo', ...)` 策略。
+- `docs/ARCHITECTURE_FLOW.md` 同步新增 Demo Prompt 配置示例与策略说明。
+
 ## 0.0.25
 
 ### 新增
