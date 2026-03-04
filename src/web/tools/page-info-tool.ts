@@ -241,6 +241,46 @@ export function generateSnapshot(
     return true;
   }
 
+  /** 判断元素是否存在绑定事件（inline 或 addEventListener 追踪）。 */
+  function hasBoundEvents(el: Element): boolean {
+    if (hasTrackedElementEvents(el)) return true;
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.startsWith("on")) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 判断子树内是否存在绑定事件元素。
+   *
+   * 说明：
+   * - 该判定只用于“是否允许剪枝布局容器”。
+   * - 命中扫描预算上限时保守返回 true，避免误剪导致交互目标丢失。
+   */
+  function hasBoundEventsInSubtree(el: Element, scanBudget = 180): boolean {
+    const stack: Element[] = Array.from(el.children);
+    let scanned = 0;
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) continue;
+
+      if (hasBoundEvents(current)) return true;
+
+      scanned += 1;
+      if (scanned >= scanBudget) {
+        return true;
+      }
+
+      const children = Array.from(current.children);
+      for (let i = children.length - 1; i >= 0; i--) {
+        stack.push(children[i]);
+      }
+    }
+
+    return false;
+  }
+
   /**
    * 判断元素是否为「无意义布局容器」（智能剪枝候选）。
    * 满足所有条件时返回 true：
@@ -256,14 +296,12 @@ export function generateSnapshot(
     if (el.getAttribute("id")) return false;
     // 有 role/aria-label 的元素有语义
     if (el.getAttribute("role") || el.getAttribute("aria-label")) return false;
-    // 有内联事件（onclick 等）的元素有交互
-    for (const attr of Array.from(el.attributes)) {
-      if (attr.name.startsWith("on")) return false;
-    }
-    // 绑定过事件的容器也可能是交互入口（如委托点击）
-    if (hasTrackedElementEvents(el)) return false;
+    // 自身绑定过事件的容器也可能是交互入口（如委托点击）
+    if (hasBoundEvents(el)) return false;
     // 有直接文本内容的元素有意义
     if (directText) return false;
+    // 子树中存在绑定事件时，保留容器结构，避免折叠后丢失交互语义链路
+    if (hasBoundEventsInSubtree(el)) return false;
     return true;
   }
 
