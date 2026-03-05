@@ -46,6 +46,10 @@ import { createPageInfoTool } from "./tools/page-info-tool.js";
 import { createWaitTool } from "./tools/wait-tool.js";
 import { createEvaluateTool } from "./tools/evaluate-tool.js";
 import { RefStore } from "./ref-store.js";
+import { installEventListenerTracking } from "./event-listener-tracker.js";
+
+// 默认安装全局事件监听追踪（幂等），用于快照输出 listeners 信号。
+installEventListenerTracking();
 
 // ─── 回调类型 ───
 
@@ -381,7 +385,7 @@ export class WebAgent {
 
     try {
       const snapshot = generateSnapshot(document.body, {
-        maxDepth: 8,
+        maxDepth: 12,
         viewportOnly: false,
         maxNodes: 500,
         maxChildren: 30,

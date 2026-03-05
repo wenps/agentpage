@@ -545,6 +545,17 @@ export async function executeAgentLoop(
     previousRoundTasks = buildTaskArray(executedTaskCalls);
     previousRoundPlannedTasks = plannedTasksCurrentRound;
 
+    // 协议显式 DONE 且本轮已完成执行且无错误：直接收敛，避免后续重复动作。
+    if (
+      parsedInstructionState.hasRemainingProtocol &&
+      remainingInstruction.trim().length === 0 &&
+      !roundHasError
+    ) {
+      finalReply = response.text?.trim() || "任务已完成。";
+      if (finalReply) callbacks?.onText?.(finalReply);
+      break;
+    }
+
     // 保护 5：空转检测
     const attemptedTaskCalls = response.toolCalls.map(tc => ({ name: tc.name, input: tc.input }));
     const idleResult = detectIdleLoop(attemptedTaskCalls, consecutiveReadOnlyRounds);

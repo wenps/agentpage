@@ -18,6 +18,7 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
 import type { RefStore } from "../ref-store.js";
+import { getTrackedElementEvents } from "../event-listener-tracker.js";
 
 // ─── 常量 ───
 
@@ -59,6 +60,11 @@ const KEY_CODE_MAP: Record<string, string> = {
   Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
   Control: "ControlLeft", Shift: "ShiftLeft", Alt: "AltLeft", Meta: "MetaLeft",
 };
+
+const FILL_RELEVANT_EVENTS = new Set([
+  "input", "change", "focus", "blur", "keydown",
+  "click", "mousedown", "pointerdown",
+]);
 
 // ─── 模块状态 ───
 
@@ -279,7 +285,37 @@ function ensureActionable(el: Element, action: string, selector: string, force: 
     return { content: `"${selector}" 元素已禁用（disabled/aria-disabled），无法执行 ${action}`, details: { error: true, code: "ELEMENT_DISABLED", action, selector } };
   }
   if (["fill", "type", "clear"].includes(action) && !isEditableElement(el)) {
+    // 允许 fill 作用于 role=slider（后续在 fill 分支做专门处理）
+    if (action === "fill" && el.getAttribute("role") === "slider") {
+      return null;
+    }
     return { content: `"${selector}" 不是可编辑元素，无法执行 ${action}`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
+  }
+  return null;
+}
+
+/**
+ * 为 role=slider 查找关联的数值输入框。
+ * 典型场景：Element Plus slider + input-number 同属一个 form-item。
+ */
+function findAssociatedSliderInput(slider: Element): HTMLInputElement | null {
+  const candidates: Element[] = [];
+
+  const formItem = slider.closest(".el-form-item");
+  if (formItem) candidates.push(formItem);
+
+  let cursor: Element | null = slider.parentElement;
+  for (let depth = 0; cursor && depth < 4; depth++, cursor = cursor.parentElement) {
+    candidates.push(cursor);
+  }
+
+  for (const scope of candidates) {
+    const input = scope.querySelector(
+      'input[type="number"], input[role="spinbutton"], .el-input-number input:not([type="hidden"])',
+    );
+    if (input instanceof HTMLInputElement && isEditableElement(input) && isElementVisible(input)) {
+      return input;
+    }
   }
   return null;
 }
@@ -335,6 +371,158 @@ function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: strin
   const desc = Object.getOwnPropertyDescriptor(proto, "value");
   if (desc?.set) desc.set.call(el, value);
   else el.value = value;
+}
+
+function getFillEventSupportScore(el: Element): number {
+  let score = 0;
+
+  if (el.hasAttribute("oninput") || el.hasAttribute("onchange")) score += 80;
+  if (el.hasAttribute("onfocus") || el.hasAttribute("onblur")) score += 60;
+  if (el.hasAttribute("onclick")) score += 40;
+
+  const tracked = getTrackedElementEvents(el);
+  for (const eventName of tracked) {
+    if (!FILL_RELEVANT_EVENTS.has(eventName)) continue;
+    if (eventName === "input") score += 40;
+    else if (eventName === "change") score += 35;
+    else if (eventName === "focus" || eventName === "blur") score += 28;
+    else if (eventName === "keydown") score += 24;
+    else score += 14;
+  }
+
+  return score;
+}
+
+function isCandidateFillTarget(el: Element): boolean {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+    return !isElementDisabled(el);
+  }
+  if (el instanceof HTMLElement && el.isContentEditable) return true;
+  return false;
+}
+
+function executeFillOnResolvedTarget(
+  target: Element,
+  value: string,
+  selector: string,
+  action: string,
+  sourceHint?: string,
+): ToolCallResult | null {
+  if (target instanceof HTMLInputElement) {
+    const type = target.type.toLowerCase();
+    if (INPUT_BLOCKED_TYPES.has(type)) {
+      return { content: `"${selector}" 为 input[type=${type}]，不支持 fill；请使用 click/check 等动作。`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
+    }
+    if (INPUT_SET_VALUE_TYPES.has(type)) {
+      const finalVal = type === "color" ? value.toLowerCase().trim() : value.trim();
+      target.focus();
+      target.value = finalVal;
+      if (target.value !== finalVal) {
+        return { content: `"${selector}" 填写格式不匹配（type=${type}）`, details: { error: true, code: "MALFORMED_VALUE", action, selector } };
+      }
+      dispatchInputEvents(target);
+      const suffix = sourceHint ? `（${sourceHint}）` : "";
+      return { content: `已填写 ${describeElement(target)}: "${finalVal}"${suffix}` };
+    }
+    if (type === "number" && Number.isNaN(Number(value.trim()))) {
+      return { content: `"${selector}" 为 input[type=number]，无法填写非数字 "${value}"`, details: { error: true, code: "INVALID_NUMBER", action, selector } };
+    }
+    scrollIntoViewIfNeeded(target);
+    target.focus();
+    selectText(target);
+    setNativeValue(target, value);
+    dispatchInputEvents(target);
+    if (target.value !== value) {
+      return { content: `"${selector}" 填写后值不一致：期望 "${value}"，实际 "${target.value}"`, details: { error: true, code: "FILL_NOT_APPLIED", action, selector } };
+    }
+    const suffix = sourceHint ? `（${sourceHint}）` : "";
+    return { content: `已填写 ${describeElement(target)}: "${value}"${suffix}` };
+  }
+
+  if (target instanceof HTMLTextAreaElement) {
+    scrollIntoViewIfNeeded(target);
+    target.focus();
+    selectText(target);
+    setNativeValue(target, value);
+    dispatchInputEvents(target);
+    const suffix = sourceHint ? `（${sourceHint}）` : "";
+    return { content: `已填写 ${describeElement(target)}: "${value}"${suffix}` };
+  }
+
+  if (target instanceof HTMLSelectElement) {
+    target.focus();
+    const options = Array.from(target.options);
+    let matched = options.find(o => o.value === value);
+    if (!matched) {
+      const normalized = value.trim().toLowerCase();
+      matched = options.find(o => o.text.trim().toLowerCase() === normalized);
+    }
+    if (!matched) return { content: `"${selector}" 下拉框中不存在选项 "${value}"` };
+    target.value = matched.value;
+    dispatchInputEvents(target);
+    const suffix = sourceHint ? `（${sourceHint}）` : "";
+    return { content: `已填写 ${describeElement(target)}: "${value}"${suffix}` };
+  }
+
+  if (target instanceof HTMLElement && target.isContentEditable) {
+    target.focus();
+    selectText(target);
+    if (value) document.execCommand("insertText", false, value);
+    else document.execCommand("delete", false, undefined);
+    const suffix = sourceHint ? `（${sourceHint}）` : "";
+    return { content: `已填写 ${describeElement(target)}: "${value}"${suffix}` };
+  }
+
+  return null;
+}
+
+function guessNearbyFillTarget(anchor: Element, value: string): Element | null {
+  const preferNumeric = Number.isFinite(Number(value));
+  const scopeEntries: Array<{ scope: Element; level: number }> = [];
+
+  const formItem = anchor.closest(".el-form-item");
+  if (formItem) scopeEntries.push({ scope: formItem, level: 0 });
+
+  let cursor: Element | null = anchor.parentElement;
+  for (let level = 1; cursor && level <= 4; level++, cursor = cursor.parentElement) {
+    scopeEntries.push({ scope: cursor, level });
+  }
+
+  const visited = new Set<Element>();
+  let best: { el: Element; score: number } | null = null;
+
+  for (const { scope, level } of scopeEntries) {
+    const candidates = Array.from(scope.querySelectorAll(
+      'input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="spinbutton"]',
+    ));
+
+    for (const candidate of candidates) {
+      if (!(candidate instanceof Element)) continue;
+      if (visited.has(candidate)) continue;
+      visited.add(candidate);
+
+      if (!isCandidateFillTarget(candidate)) continue;
+      if (!isElementVisible(candidate)) continue;
+
+      let score = 100 - level * 18;
+      score += getFillEventSupportScore(candidate);
+
+      if (candidate instanceof HTMLInputElement) {
+        const type = candidate.type.toLowerCase();
+        if (preferNumeric && (type === "number" || candidate.getAttribute("role") === "spinbutton")) score += 80;
+        if (!preferNumeric && ["text", "", "search", "email", "tel", "url", "password"].includes(type)) score += 36;
+      }
+
+      if (candidate.getAttribute("placeholder")) score += 8;
+      if (candidate.getAttribute("aria-label")) score += 8;
+
+      if (!best || score > best.score) {
+        best = { el: candidate, score };
+      }
+    }
+  }
+
+  return best?.el ?? null;
 }
 
 // ─── selectText（参考 Playwright：input/textarea/contenteditable 三种策略） ───
@@ -643,62 +831,56 @@ export function createDomTool(): ToolDefinition {
             if (value === undefined) return { content: "缺少 value 参数" };
             const target = retarget(el, "follow-label");
 
-            if (target instanceof HTMLInputElement) {
-              const type = target.type.toLowerCase();
-              if (INPUT_BLOCKED_TYPES.has(type)) {
-                return { content: `"${selector}" 为 input[type=${type}]，不支持 fill；请使用 click/check 等动作。`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
+            // role=slider 特化：优先写关联数字输入框，其次点击离散子项（评分星级）
+            if (target instanceof HTMLElement && target.getAttribute("role") === "slider") {
+              const numericValue = Number(value);
+              if (!Number.isFinite(numericValue)) {
+                const guessed = guessNearbyFillTarget(target, value);
+                if (guessed) {
+                  const guessedResult = executeFillOnResolvedTarget(guessed, value, selector, action, "heuristic-nearby-target");
+                  if (guessedResult) return guessedResult;
+                }
+                return { content: `"${selector}" 为 role=slider，未找到可推断填写目标`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
               }
-              // date/color/range 等：直接 setValue（参考 Playwright kInputTypesToSetValue）
-              if (INPUT_SET_VALUE_TYPES.has(type)) {
-                const finalVal = type === "color" ? value.toLowerCase().trim() : value.trim();
-                target.focus(); target.value = finalVal;
-                if (target.value !== finalVal) return { content: `"${selector}" 填写格式不匹配（type=${type}）`, details: { error: true, code: "MALFORMED_VALUE", action, selector } };
-                dispatchInputEvents(target);
-                return { content: `已填写 ${describeElement(target)}: "${finalVal}"` };
+
+              const linkedInput = findAssociatedSliderInput(target);
+              if (linkedInput) {
+                const filled = executeFillOnResolvedTarget(linkedInput, String(numericValue), selector, action, `from ${describeElement(target)}`);
+                if (filled) return filled;
               }
-              // number 验证
-              if (type === "number" && isNaN(Number(value.trim()))) {
-                return { content: `"${selector}" 为 input[type=number]，无法填写非数字 "${value}"`, details: { error: true, code: "INVALID_NUMBER", action, selector } };
+
+              const min = Number(target.getAttribute("aria-valuemin") ?? "1");
+              const max = Number(target.getAttribute("aria-valuemax") ?? String(target.children.length || 5));
+              const discreteCount = Number.isFinite(max - min + 1) ? Math.max(1, Math.round(max - min + 1)) : target.children.length;
+              const desiredIndex = Math.round(numericValue - min);
+              const children = Array.from(target.children).filter((node): node is HTMLElement => node instanceof HTMLElement);
+
+              if (children.length >= discreteCount && desiredIndex >= 0 && desiredIndex < children.length) {
+                const item = children[desiredIndex];
+                scrollIntoViewIfNeeded(item);
+                dispatchClickEvents(item);
+                return { content: `已点击 ${describeElement(item)}，设置 ${describeElement(target)} 值为 ${numericValue}` };
               }
-              // text 类：focus → selectAll → 写入（参考 Playwright selectText+insertText）
-              scrollIntoViewIfNeeded(target);
-              target.focus();
-              selectText(target);
-              setNativeValue(target, value);
-              dispatchInputEvents(target);
-              if (target.value !== value) {
-                return { content: `"${selector}" 填写后值不一致：期望 "${value}"，实际 "${target.value}"`, details: { error: true, code: "FILL_NOT_APPLIED", action, selector } };
+
+              const guessed = guessNearbyFillTarget(target, String(numericValue));
+              if (guessed) {
+                const guessedResult = executeFillOnResolvedTarget(guessed, String(numericValue), selector, action, "heuristic-nearby-target");
+                if (guessedResult) return guessedResult;
               }
-              return { content: `已填写 ${describeElement(target)}: "${value}"` };
+
+              return { content: `"${selector}" 为 role=slider，但未找到可写入输入框或可点击离散子项`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
             }
 
-            if (target instanceof HTMLTextAreaElement) {
-              scrollIntoViewIfNeeded(target);
-              target.focus(); selectText(target);
-              setNativeValue(target, value);
-              dispatchInputEvents(target);
-              return { content: `已填写 ${describeElement(target)}: "${value}"` };
+            const directFilled = executeFillOnResolvedTarget(target, value, selector, action);
+            if (directFilled) return directFilled;
+
+            const guessed = guessNearbyFillTarget(target, value);
+            if (guessed) {
+              const guessedResult = executeFillOnResolvedTarget(guessed, value, selector, action, "heuristic-nearby-target");
+              if (guessedResult) return guessedResult;
             }
 
-            if (target instanceof HTMLSelectElement) {
-              target.focus();
-              const options = Array.from(target.options);
-              let matched = options.find(o => o.value === value);
-              if (!matched) { const n = value.trim().toLowerCase(); matched = options.find(o => o.text.trim().toLowerCase() === n); }
-              if (!matched) return { content: `"${selector}" 下拉框中不存在选项 "${value}"` };
-              target.value = matched.value;
-              dispatchInputEvents(target);
-              return { content: `已填写 ${describeElement(target)}: "${value}"` };
-            }
-
-            if (target instanceof HTMLElement && target.isContentEditable) {
-              target.focus(); selectText(target);
-              if (value) document.execCommand("insertText", false, value);
-              else document.execCommand("delete", false, undefined);
-              return { content: `已填写 ${describeElement(target)}: "${value}"` };
-            }
-
-            return { content: `"${selector}" 不是可编辑元素` };
+            return { content: `"${selector}" 不是可编辑元素，且未在附近找到可推断填写目标`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
           }
 
           // ─── select_option（参考 Playwright selectOptions 多策略匹配） ───

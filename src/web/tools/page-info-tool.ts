@@ -15,11 +15,12 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition, ToolCallResult } from "../../core/tool-registry.js";
 import type { RefStore } from "../ref-store.js";
+import { getTrackedElementEvents, hasTrackedElementEvents } from "../event-listener-tracker.js";
 import { getActiveRefStore } from "./dom-tool.js";
 
 /** 快照配置选项 */
 export type SnapshotOptions = {
-  /** 最大遍历深度（默认 6） */
+  /** 最大遍历深度（默认 12） */
   maxDepth?: number;
   /**
    * 视口裁剪：只保留与视口相交的元素（默认 true）。
@@ -65,6 +66,25 @@ const MAX_SNAPSHOT_ATTR_VALUE_LENGTH = 120;
 const MAX_EXPANDED_LIST_CHILDREN = 120;
 /** 定向放宽 children 的硬上限。 */
 const MAX_EXPANDED_CHILDREN_LIMIT = 300;
+
+/** 事件名 → 快照简写映射（压缩 token）。 */
+const EVENT_ABBREV: Record<string, string> = {
+  click: "clk", dblclick: "dbl",
+  mousedown: "mdn", mouseup: "mup", mousemove: "mmv",
+  mouseover: "mov", mouseout: "mot", mouseenter: "men", mouseleave: "mlv",
+  pointerdown: "pdn", pointerup: "pup", pointermove: "pmv",
+  touchstart: "tst", touchend: "ted",
+  keydown: "kdn", keyup: "kup",
+  input: "inp", change: "chg", submit: "sub",
+  focus: "fcs", blur: "blr",
+  scroll: "scl", wheel: "whl",
+  drag: "drg", dragstart: "drs", dragend: "dre", drop: "drp",
+  contextmenu: "ctx",
+};
+
+function abbrevEvent(name: string): string {
+  return EVENT_ABBREV[name] ?? name.slice(0, 3);
+}
 
 /**
  * 规整快照属性值，避免把长 base64/data URL 原样注入快照。
@@ -125,7 +145,7 @@ export function generateSnapshot(
     ? { maxDepth: options }
     : options;
 
-  const maxDepth = opts.maxDepth ?? 6;
+  const maxDepth = opts.maxDepth ?? 12;
   const viewportOnly = opts.viewportOnly ?? true;
   const pruneLayout = opts.pruneLayout ?? true;
   const maxNodes = opts.maxNodes ?? 220;
@@ -169,6 +189,41 @@ export function generateSnapshot(
   const INTERACTIVE_TAGS = new Set([
     "A", "BUTTON", "INPUT", "TEXTAREA", "SELECT", "OPTION", "LABEL", "SUMMARY",
   ]);
+
+  const INTERACTIVE_EVENTS = new Set([
+    "click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup",
+    "touchstart", "touchend", "input", "change", "keydown", "keyup",
+    "submit", "focus", "blur",
+  ]);
+
+  /** 交互性 ARIA role — 需要分配 hash ID 的角色集合 */
+  const INTERACTIVE_ROLES = new Set([
+    "button", "link", "tab", "switch", "slider", "checkbox", "radio",
+    "combobox", "listbox", "option", "menuitem", "textbox", "spinbutton",
+    "searchbox", "treeitem", "gridcell", "scrollbar",
+  ]);
+
+  /**
+   * 事件优先级（值越大越优先）：
+   * 输入链路（input/change/focus/blur） > 点击链路（click/pointer） > 其他事件。
+   */
+  const EVENT_PRIORITY: Record<string, number> = {
+    input: 140,
+    change: 130,
+    focus: 120,
+    blur: 110,
+    keydown: 100,
+    keyup: 90,
+    click: 80,
+    dblclick: 70,
+    pointerdown: 60,
+    pointerup: 55,
+    mousedown: 50,
+    mouseup: 45,
+    touchstart: 40,
+    touchend: 35,
+    submit: 30,
+  };
 
   /** 布尔状态属性 — 只在存在时输出（无值），如 disabled、checked */
   const BOOLEAN_ATTRS = [
@@ -225,9 +280,71 @@ export function generateSnapshot(
     for (const attr of Array.from(el.attributes)) {
       if (attr.name.startsWith("on")) return false;
     }
+    // 运行时追踪到事件绑定的元素有交互语义
+    if (hasTrackedElementEvents(el)) return false;
     // 有直接文本内容的元素有意义
     if (directText) return false;
     return true;
+  }
+
+  function hasInteractiveTrackedEvents(el: Element): boolean {
+    const tracked = getTrackedElementEvents(el);
+    if (tracked.length === 0) return false;
+    return tracked.some(name => INTERACTIVE_EVENTS.has(name));
+  }
+
+  function getTrackedEventPriorityScore(el: Element): number {
+    const tracked = getTrackedElementEvents(el);
+    if (tracked.length === 0) return 0;
+
+    let score = 0;
+    for (const name of tracked) {
+      score += EVENT_PRIORITY[name] ?? 8;
+    }
+    return score;
+  }
+
+  /**
+   * 元素优先级：
+   * 1) 输入控件/按钮等语义控件
+   * 2) 事件追踪优先级（输入、点击、失焦等）
+   * 3) inline 事件与可聚焦能力补充加分
+   */
+  function getElementPriorityScore(el: Element): number {
+    let score = 0;
+
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+      score += 200;
+    } else if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement) {
+      score += 180;
+    } else if (el.getAttribute("role") === "button" || el.getAttribute("role") === "switch" || el.getAttribute("role") === "slider") {
+      score += 160;
+    }
+
+    score += getTrackedEventPriorityScore(el);
+
+    if (el.hasAttribute("onclick")) score += 60;
+    if (el.hasAttribute("oninput") || el.hasAttribute("onchange")) score += 80;
+    if (el.hasAttribute("onfocus") || el.hasAttribute("onblur")) score += 70;
+    if (el.hasAttribute("tabindex")) score += 20;
+
+    return score;
+  }
+
+  function orderChildrenByPriority(children: Element[]): Element[] {
+    return children
+      .map((child, index) => ({
+        child,
+        index,
+        interactive: isInteractiveElement(child),
+        score: getElementPriorityScore(child),
+      }))
+      .sort((a, b) => {
+        if (a.interactive !== b.interactive) return a.interactive ? -1 : 1;
+        if (b.score !== a.score) return b.score - a.score;
+        return a.index - b.index;
+      })
+      .map(entry => entry.child);
   }
 
   function isInteractiveElement(el: Element): boolean {
@@ -236,6 +353,32 @@ export function generateSnapshot(
     if (el.hasAttribute("role")) return true;
     if (el.hasAttribute("tabindex")) return true;
     if (el.hasAttribute("aria-label")) return true;
+    if (hasInteractiveTrackedEvents(el)) return true;
+    return false;
+  }
+
+  /**
+   * 判断元素是否需要分配 hash ID（仅交互节点分配，节省 token）。
+   *
+   * 核心依据：元素是否绑定了交互事件（INTERACTIVE_EVENTS 集合）。
+   * 辅助依据：语义交互标签、内联事件、ARIA role、tabindex 等兜底。
+   */
+  function needsHashId(el: Element): boolean {
+    // 核心判定：有追踪到的交互事件（click/input/change/focus/blur 等）
+    if (hasInteractiveTrackedEvents(el)) return true;
+    // 内联事件处理器（onclick/oninput 等）
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.startsWith("on")) return true;
+    }
+    // 语义交互标签兜底（即使没有事件追踪也应可操作）
+    if (INTERACTIVE_TAGS.has(el.tagName)) return true;
+    // 交互性 ARIA role 兜底
+    const role = el.getAttribute("role");
+    if (role && INTERACTIVE_ROLES.has(role)) return true;
+    // tabindex → 可聚焦
+    if (el.hasAttribute("tabindex")) return true;
+    // contenteditable → 可编辑
+    if ((el as HTMLElement).isContentEditable && el.getAttribute("contenteditable") !== "inherit") return true;
     return false;
   }
 
@@ -297,10 +440,21 @@ export function generateSnapshot(
     const indent = "  ".repeat(depth);
     const tag = el.tagName.toLowerCase();
 
-    // 构建当前元素的内部路径（用于 hash 计算，不输出到快照）
+    // ─── 角色优先标签 ───
+    // 当元素有 INTERACTIVE_ROLES 内的 role 且与 tag 不等价时，
+    // 用 role 替代 tag 作为显示标签（如 [combobox] 替代 [input] role="combobox"）。
+    // 这让 AI 直接从标签判断交互模式，同时省去冗余的 role="..." 属性。
+    const rawRole = el.getAttribute("role");
+    const useRoleAsTag = !!(rawRole && INTERACTIVE_ROLES.has(rawRole) && rawRole !== tag);
+    const displayTag = useRoleAsTag ? rawRole : tag;
+
+    // 构建当前元素的内部路径（始终计算，子元素路径依赖它）
+    // 注意：路径使用原始 tag 而非 displayTag，保证 hash 计算一致性
     const index = getSiblingIndex(el);
     const currentPath = `${parentPath}/${tag}${index}`;
-    const hashId = refStore ? refStore.set(el, currentPath) : undefined;
+    // 仅交互节点分配 hash ID 并注册到 RefStore，非交互节点不占 token
+    const shouldAssignHash = refStore && needsHashId(el);
+    const hashId = shouldAssignHash ? refStore.set(el, currentPath) : undefined;
 
     // 收集有意义的属性（精简版：只保留对 AI 操作有用的信息）
     const attrs: string[] = [];
@@ -319,6 +473,8 @@ export function generateSnapshot(
 
     // 3. 交互属性（href, type, placeholder 等）
     for (const attr of INTERACTIVE_ATTRS) {
+      // 若 role 已提升为显示标签，跳过 role 属性避免重复输出
+      if (attr === "role" && useRoleAsTag) continue;
       const val = el.getAttribute(attr);
       if (val) {
         const safeVal = sanitizeSnapshotAttrValue(val);
@@ -341,6 +497,14 @@ export function generateSnapshot(
 
     // 5. 事件绑定 — 只标记有 onclick（最重要的交互信号）
     if (el.hasAttribute("onclick")) attrs.push("onclick");
+
+    // 5.1 运行时事件绑定（addEventListener 追踪）
+    const trackedEvents = getTrackedElementEvents(el);
+    if (trackedEvents.length > 0) {
+      const preview = trackedEvents.slice(0, 6).map(abbrevEvent).join(",");
+      const suffix = trackedEvents.length > 6 ? ",..." : "";
+      attrs.push(`listeners="${preview}${suffix}"`);
+    }
 
     // 6. data-* 属性 — 只保留 data-testid（自动化测试定位用）
     const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
@@ -388,9 +552,7 @@ export function generateSnapshot(
     // 则输出括号分组块，显式保留这些节点的关联来源。
     if (isEmptyLayoutContainer(el, directText)) {
       const allChildren = Array.from(el.children);
-      const interactiveChildren = allChildren.filter(isInteractiveElement);
-      const nonInteractiveChildren = allChildren.filter((child) => !isInteractiveElement(child));
-      const orderedChildren = [...interactiveChildren, ...nonInteractiveChildren];
+      const orderedChildren = orderChildrenByPriority(allChildren);
       const childLimit = resolveChildLimit(el, maxChildren, hashId);
       const selectedChildren = orderedChildren.slice(0, childLimit);
       const omittedChildren = orderedChildren.length - selectedChildren.length;
@@ -413,7 +575,7 @@ export function generateSnapshot(
       }
 
       const groupLines: string[] = [
-        `${"  ".repeat(depth)}([${tag}] collapsed-group`,
+        `${"  ".repeat(depth)}([${displayTag}] collapsed-group`,
       ];
       for (const block of childBlocks) {
         groupLines.push(indentMultiline(block, 1));
@@ -427,15 +589,14 @@ export function generateSnapshot(
       return groupLines.join("\n");
     }
 
-    // 构建当前元素描述：[标签] "文本" 属性 #ID
-    let line = `${indent}[${tag}]`;
+    // 构建当前元素描述：[显示标签] "文本" 属性 #hashID（仅交互节点）
+    // displayTag 在有交互性 role 时为 role 值，否则为原始 HTML tag
+    let line = `${indent}[${displayTag}]`;
     if (directText) line += ` "${directText.slice(0, maxTextLength)}"`;
     if (attrs.length) line += ` ${attrs.join(" ")}`;
-    // 使用 hash ID（如 #a1b2c）或回退到完整 XPath
+    // 仅交互节点输出 hash ID，非交互节点不附加标识（省 token）
     if (hashId) {
       line += ` #${hashId}`;
-    } else {
-      line += ` ref="${currentPath}"`;
     }
 
     const lines: string[] = [line];
@@ -443,9 +604,7 @@ export function generateSnapshot(
 
     // 递归子元素（优先保留可交互元素，再保留普通元素）
     const allChildren = Array.from(el.children);
-    const interactiveChildren = allChildren.filter(isInteractiveElement);
-    const nonInteractiveChildren = allChildren.filter((child) => !isInteractiveElement(child));
-    const orderedChildren = [...interactiveChildren, ...nonInteractiveChildren];
+    const orderedChildren = orderChildrenByPriority(allChildren);
     const childLimit = resolveChildLimit(el, maxChildren, hashId);
     const selectedChildren = orderedChildren.slice(0, childLimit);
     const omittedChildren = orderedChildren.length - selectedChildren.length;
@@ -530,7 +689,7 @@ export function createPageInfoTool(): ToolDefinition {
         Type.String({ description: "CSS selector for query_all action" }),
       ),
       maxDepth: Type.Optional(
-        Type.Number({ description: "Max depth for snapshot (default: 6)" }),
+        Type.Number({ description: "Max depth for snapshot (default: 12)" }),
       ),
       viewportOnly: Type.Optional(
         Type.Boolean({ description: "Only snapshot elements visible in viewport (default: true)" }),
@@ -591,7 +750,7 @@ export function createPageInfoTool(): ToolDefinition {
 
           case "snapshot": {
             // 生成 DOM 快照 — AI 理解当前页面结构的主要方式
-            const maxDepth = (params.maxDepth as number) ?? 6;
+            const maxDepth = (params.maxDepth as number) ?? 12;
             const viewportOnly = (params.viewportOnly as boolean) ?? true;
             const pruneLayout = (params.pruneLayout as boolean) ?? true;
             const maxNodes = (params.maxNodes as number) ?? 220;

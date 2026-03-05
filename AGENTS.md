@@ -50,6 +50,7 @@ src/
   ├── page-info-tool.ts    # 兼容转发层（re-export）
   ├── wait-tool.ts         # 兼容转发层（re-export）
   ├── evaluate-tool.ts     # 兼容转发层（re-export）
+  ├── event-listener-tracker.ts  # 全局事件监听追踪器
   ├── ref-store.ts
   ├── messaging.ts
   └── tools/
@@ -155,6 +156,8 @@ src/
 - `wait.wait_for_selector`：支持 `state=attached|visible|hidden|detached`（默认 `attached`）。
 - 快照增强运行态：`select val`、`option selected`、`checked`、`disabled`、`readonly` 可见。
 - 快照增强结构语义：布局折叠后可通过括号分组块（`collapsed-group`）看出被提升节点之间的来源关联。
+- 仅交互节点分配 hash ID：通过 `hasInteractiveTrackedEvents()` + 语义标签/ARIA role 判定交互性，非交互节点不占 token。
+- 角色优先标签：当元素拥有 `INTERACTIVE_ROLES` 内的 ARIA role 且与 HTML tag 不等价时，用 role 替代 tag 作为显示标签（如 `[combobox]` 替代 `[input] role="combobox"`、`[slider]` 替代 `[div] role="slider"`），同时从属性列表中移除冗余的 `role="..."`。
 
 ## 5. 模块职责细化
 
@@ -204,6 +207,7 @@ src/
 - `tools/wait-tool.ts`：支持 selector state 等待语义（attached/visible/hidden/detached）
 - `tools/page-info-tool.ts`：快照输出运行态字段（selected/checked/disabled/readonly）
 - `dom-tool.ts` / `navigate-tool.ts` / `page-info-tool.ts` / `wait-tool.ts` / `evaluate-tool.ts`：兼容转发层，避免外部导入路径断裂
+- `event-listener-tracker.ts`：全局事件监听追踪器，通过 `EventTarget.prototype` 补丁拦截 `addEventListener/removeEventListener`，记录每个 Element 的运行时事件绑定。为快照的交互性判定（`hasInteractiveTrackedEvents`）、事件简写标注（`listeners="clk,inp,..."`）和优先级排序提供基础数据
 - `ref-store.ts`：`#hashID -> Element` 映射
 - `messaging.ts`：Extension 场景消息桥
 

@@ -63,7 +63,7 @@ export async function readPageUrl(
  * 4) 返回稳定字符串给 loop，供后续注入消息与统计。
  *
  * 默认参数意图：
- * - `maxDepth=8`: 保留足够层级，减少关键控件被截断。
+ * - `maxDepth=12`: 保留更深层级，减少深层组件控件被截断。
  * - `viewportOnly=false`: 优先完整性，避免误判“元素不存在”。
  * - `pruneLayout=true`: 抑制纯布局噪声，降低 token 压力。
  * - `maxNodes=500` / `maxChildren=30`: 控制体积上限，兼顾可读性。
@@ -101,7 +101,7 @@ export async function readPageSnapshot(
 ): Promise<string> {
   const result = await registry.dispatch("page_info", {
     action: "snapshot",
-    maxDepth: options?.maxDepth ?? 8,
+    maxDepth: options?.maxDepth ?? 12,
     viewportOnly: options?.viewportOnly ?? false,
     pruneLayout: options?.pruneLayout ?? true,
     maxNodes: options?.maxNodes ?? 500,
