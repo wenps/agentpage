@@ -1173,6 +1173,7 @@ loop 对本轮返回做以下处理：
 - `Current remaining instruction`
 - `Done steps (do NOT repeat)`
 - `Previous round planned task array`
+- `Effect verification` — 要求 AI 对比上轮操作与当前快照，确认每个操作是否生效；未生效时从同区域找其他目标而非重复
 - `Previous round model output (normalized)`
 - `Latest DOM snapshot`
 

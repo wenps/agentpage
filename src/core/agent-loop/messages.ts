@@ -320,6 +320,19 @@ export function buildCompactMessages(
       "Previous round planned task array (already executed):",
       ...previousRoundTasks.map((task, index) => `${index + 1}. ${task}`),
     );
+
+    // ─── 效果验证指令 ───
+    // 要求 AI 在规划新操作前，先对比上轮操作与当前快照，判断是否生效。
+    // 如果未生效，要求从同一区域找其他可操作目标，而非重复相同操作。
+    contextParts.push(
+      "",
+      "## Effect verification (MANDATORY before planning new actions)",
+      "Compare the above executed actions against the CURRENT snapshot below:",
+      "- Did each action produce the expected result? (e.g., click opened a dialog/navigated; fill changed the input value; select_option updated the selected item)",
+      "- If an action had NO visible effect (page unchanged near the target area), do NOT repeat the same target.",
+      "  Instead, look for a different actionable element nearby (sibling/ancestor in the same row/card/group) that has stronger interaction signals (click listeners, button/link semantics).",
+      "- Only after confirming which previous actions succeeded, plan this round's new actions on the remaining unfinished parts.",
+    );
   }
 
   if (previousRoundPlannedTasks && previousRoundPlannedTasks.length > 0) {
