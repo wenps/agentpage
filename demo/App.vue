@@ -1,9 +1,8 @@
 <template>
   <div class="app-container">
-    <!-- ======= 顶栏 ======= -->
     <el-header class="topbar">
       <div class="topbar-left">
-        <h1>AutoPilot · Element Plus 交互验证</h1>
+        <h1>AutoPilot · B 端多路由复杂场景 Demo</h1>
         <el-tag :type="connected ? 'success' : 'danger'" size="small">
           {{ connected ? '已连接' : '未连接' }}
         </el-tag>
@@ -31,739 +30,67 @@
       </div>
     </el-header>
 
-    <!-- ======= 主内容区 ======= -->
     <el-main class="main-content">
-      <el-tabs v-model="activeTab" type="border-card">
-        <!-- ===== Tab 1: 表单交互 ===== -->
-        <el-tab-pane label="表单组件" name="form">
-          <el-row :gutter="20">
-            <el-col :span="12">
-              <el-card header="基础表单">
-                <el-form :model="form" label-width="100px" size="default">
-                  <el-form-item label="用户名">
-                    <el-input v-model="form.username" placeholder="请输入用户名" clearable />
-                  </el-form-item>
-                  <el-form-item label="密码">
-                    <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password />
-                  </el-form-item>
-                  <el-form-item label="邮箱">
-                    <el-input v-model="form.email" placeholder="example@mail.com" />
-                  </el-form-item>
-                  <el-form-item label="个人简介">
-                    <el-input v-model="form.bio" type="textarea" :rows="3" placeholder="介绍一下你自己" />
-                  </el-form-item>
-                  <el-form-item label="年龄">
-                    <el-input-number v-model="form.age" :min="1" :max="120" />
-                  </el-form-item>
-                  <el-form-item>
-                    <el-button type="primary" @click="onFormSubmit">提交</el-button>
-                    <el-button @click="onFormReset">重置</el-button>
-                  </el-form-item>
-                </el-form>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="选择器">
-                <el-form label-width="100px" size="default">
-                  <el-form-item label="城市">
-                    <el-select v-model="form.city" placeholder="请选择城市" clearable filterable>
-                      <el-option label="北京" value="beijing" />
-                      <el-option label="上海" value="shanghai" />
-                      <el-option label="广州" value="guangzhou" />
-                      <el-option label="深圳" value="shenzhen" />
-                      <el-option label="杭州" value="hangzhou" />
-                      <el-option label="成都" value="chengdu" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item label="多选标签">
-                    <el-select v-model="form.tags" multiple placeholder="请选择标签" collapse-tags>
-                      <el-option label="前端" value="frontend" />
-                      <el-option label="后端" value="backend" />
-                      <el-option label="全栈" value="fullstack" />
-                      <el-option label="DevOps" value="devops" />
-                      <el-option label="AI" value="ai" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item label="级联选择">
-                    <el-cascader
-                      v-model="form.cascaderValue"
-                      :options="cascaderOptions"
-                      placeholder="请选择地区"
-                      clearable
-                    />
-                  </el-form-item>
-                  <el-form-item label="日期">
-                    <el-date-picker
-                      v-model="form.date"
-                      type="date"
-                      placeholder="选择日期"
-                    />
-                  </el-form-item>
-                  <el-form-item label="日期范围">
-                    <el-date-picker
-                      v-model="form.dateRange"
-                      type="daterange"
-                      range-separator="至"
-                      start-placeholder="开始日期"
-                      end-placeholder="结束日期"
-                    />
-                  </el-form-item>
-                  <el-form-item label="时间">
-                    <el-time-picker
-                      v-model="form.time"
-                      placeholder="选择时间"
-                    />
-                  </el-form-item>
-                </el-form>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="切换与选择">
-                <el-form label-width="100px" size="default">
-                  <el-form-item label="开关">
-                    <el-switch
-                      v-model="form.switchVal"
-                      active-text="开启"
-                      inactive-text="关闭"
-                    />
-                  </el-form-item>
-                  <el-form-item label="单选框">
-                    <el-radio-group v-model="form.radio">
-                      <el-radio value="option1">选项一</el-radio>
-                      <el-radio value="option2">选项二</el-radio>
-                      <el-radio value="option3">选项三</el-radio>
-                    </el-radio-group>
-                  </el-form-item>
-                  <el-form-item label="单选按钮">
-                    <el-radio-group v-model="form.radioButton">
-                      <el-radio-button value="red">红色</el-radio-button>
-                      <el-radio-button value="green">绿色</el-radio-button>
-                      <el-radio-button value="blue">蓝色</el-radio-button>
-                    </el-radio-group>
-                  </el-form-item>
-                  <el-form-item label="复选框">
-                    <el-checkbox-group v-model="form.checkboxes">
-                      <el-checkbox label="阅读" value="read" />
-                      <el-checkbox label="编程" value="code" />
-                      <el-checkbox label="运动" value="sport" />
-                      <el-checkbox label="音乐" value="music" />
-                    </el-checkbox-group>
-                  </el-form-item>
-                  <el-form-item label="评分">
-                    <el-rate v-model="form.rate" show-text />
-                  </el-form-item>
-                  <el-form-item label="滑块">
-                    <el-slider v-model="form.slider" show-input />
-                  </el-form-item>
-                  <el-form-item label="颜色选择">
-                    <el-color-picker v-model="form.color" />
-                  </el-form-item>
-                </el-form>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="穿梭框 Transfer">
-                <el-transfer
-                  v-model="form.transferValue"
-                  :data="transferData"
-                  :titles="['待选', '已选']"
-                  filterable
-                  filter-placeholder="搜索"
-                />
-              </el-card>
-            </el-col>
-          </el-row>
-        </el-tab-pane>
-
-        <!-- ===== Tab 2: 数据展示 ===== -->
-        <el-tab-pane label="数据展示" name="data">
-          <el-row :gutter="20">
-            <el-col :span="24">
-              <el-card header="数据表格">
-                <div style="margin-bottom: 12px; display: flex; gap: 10px; align-items: center;">
-                  <el-input
-                    v-model="tableSearch"
-                    placeholder="搜索姓名..."
-                    clearable
-                    size="small"
-                    style="width: 200px"
-                  />
-                  <el-button type="primary" size="small" @click="onAddRow">新增行</el-button>
-                  <el-button type="danger" size="small" @click="onDeleteSelected">删除选中</el-button>
+      <el-container class="route-layout">
+        <el-aside class="route-sidebar" width="280px">
+          <el-card shadow="never" class="route-nav-card">
+            <template #header>
+              <div class="sidebar-header">
+                <div>
+                  <div class="sidebar-title">业务导航</div>
+                  <div class="sidebar-subtitle">模拟真实 B 端项目的多级菜单</div>
                 </div>
-                <el-table
-                  :data="paginatedTableData"
-                  stripe
-                  border
-                  style="width: 100%"
-                  @selection-change="onSelectionChange"
-                >
-                  <el-table-column type="selection" width="55" />
-                  <el-table-column prop="name" label="姓名" sortable />
-                  <el-table-column prop="age" label="年龄" sortable width="100" />
-                  <el-table-column prop="email" label="邮箱" />
-                  <el-table-column prop="city" label="城市" width="120">
-                    <template #default="{ row }">
-                      <el-tag>{{ row.city }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="status" label="状态" width="100">
-                    <template #default="{ row }">
-                      <el-tag :type="row.status === '活跃' ? 'success' : 'info'">
-                        {{ row.status }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="180" fixed="right">
-                    <template #default="{ row }">
-                      <el-button size="small" @click="onEditRow(row)">编辑</el-button>
-                      <el-button size="small" type="danger" @click="onRemoveRow(row)">删除</el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
-                <el-pagination
-                  v-model:current-page="pagination.page"
-                  v-model:page-size="pagination.pageSize"
-                  :page-sizes="[5, 10, 20]"
-                  :total="filteredTableData.length"
-                  layout="total, sizes, prev, pager, next, jumper"
-                  style="margin-top: 12px; justify-content: flex-end"
-                />
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="标签 Tags">
-                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                  <el-tag
-                    v-for="tag in dynamicTags"
-                    :key="tag"
-                    closable
-                    @close="handleTagClose(tag)"
-                  >
-                    {{ tag }}
-                  </el-tag>
-                  <el-input
-                    v-if="tagInputVisible"
-                    ref="tagInputRef"
-                    v-model="tagInputValue"
-                    size="small"
-                    style="width: 100px"
-                    @keyup.enter="handleTagConfirm"
-                    @blur="handleTagConfirm"
-                  />
-                  <el-button v-else size="small" @click="showTagInput">+ 新标签</el-button>
-                </div>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="进度展示">
-                <div style="display: flex; flex-direction: column; gap: 16px;">
-                  <div>
-                    <span>线形进度条</span>
-                    <el-progress :percentage="progressVal" />
-                  </div>
-                  <div>
-                    <span>条纹进度条</span>
-                    <el-progress :percentage="progressVal" striped striped-flow />
-                  </div>
-                  <div style="display: flex; gap: 20px;">
-                    <el-progress type="circle" :percentage="progressVal" />
-                    <el-progress type="dashboard" :percentage="progressVal" />
-                  </div>
-                  <el-slider v-model="progressVal" :max="100" />
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="徽章 Badge">
-                <div style="display: flex; gap: 30px; align-items: center;">
-                  <el-badge :value="12" class="badge-item">
-                    <el-button>消息</el-button>
-                  </el-badge>
-                  <el-badge :value="3" type="primary" class="badge-item">
-                    <el-button>评论</el-button>
-                  </el-badge>
-                  <el-badge value="new" class="badge-item">
-                    <el-button>新功能</el-button>
-                  </el-badge>
-                  <el-badge :value="200" :max="99" class="badge-item">
-                    <el-button>通知</el-button>
-                  </el-badge>
-                  <el-badge is-dot class="badge-item">
-                    <el-button>未读</el-button>
-                  </el-badge>
-                </div>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="描述列表">
-                <el-descriptions :column="2" border>
-                  <el-descriptions-item label="项目名称">AutoPilot</el-descriptions-item>
-                  <el-descriptions-item label="版本">0.0.21</el-descriptions-item>
-                  <el-descriptions-item label="作者">AI Agent Team</el-descriptions-item>
-                  <el-descriptions-item label="许可证">MIT</el-descriptions-item>
-                  <el-descriptions-item label="描述" :span="2">
-                    浏览器内嵌 AI Agent SDK：让 AI 通过 tool-calling 操作网页
-                  </el-descriptions-item>
-                </el-descriptions>
-              </el-card>
-            </el-col>
-          </el-row>
-        </el-tab-pane>
-
-        <!-- ===== Tab 3: 反馈组件 ===== -->
-        <el-tab-pane label="反馈组件" name="feedback">
-          <el-row :gutter="20">
-            <el-col :span="12">
-              <el-card header="对话框 Dialog">
-                <el-button type="primary" @click="dialogVisible = true">打开对话框</el-button>
-                <el-button type="warning" @click="confirmDialogVisible = true">确认对话框</el-button>
-
-                <el-dialog v-model="dialogVisible" title="对话框标题" width="500px">
-                  <el-form :model="dialogForm" label-width="80px">
-                    <el-form-item label="活动名称">
-                      <el-input v-model="dialogForm.name" placeholder="请输入活动名称" />
-                    </el-form-item>
-                    <el-form-item label="活动类型">
-                      <el-select v-model="dialogForm.type" placeholder="请选择">
-                        <el-option label="线上" value="online" />
-                        <el-option label="线下" value="offline" />
-                        <el-option label="混合" value="hybrid" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item label="开关">
-                      <el-switch v-model="dialogForm.delivery" />
-                    </el-form-item>
-                  </el-form>
-                  <template #footer>
-                    <el-button @click="dialogVisible = false">取消</el-button>
-                    <el-button type="primary" @click="onDialogConfirm">确定</el-button>
-                  </template>
-                </el-dialog>
-
-                <el-dialog v-model="confirmDialogVisible" title="确认操作" width="400px">
-                  <span>确定要执行此操作吗？此操作不可撤销。</span>
-                  <template #footer>
-                    <el-button @click="confirmDialogVisible = false">取消</el-button>
-                    <el-button type="danger" @click="onConfirmAction">确认</el-button>
-                  </template>
-                </el-dialog>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="抽屉 Drawer">
-                <el-button @click="drawerVisible = true">打开抽屉</el-button>
-                <el-drawer v-model="drawerVisible" title="抽屉面板" size="400px">
-                  <el-form label-width="80px">
-                    <el-form-item label="标题">
-                      <el-input v-model="drawerForm.title" placeholder="请输入标题" />
-                    </el-form-item>
-                    <el-form-item label="优先级">
-                      <el-radio-group v-model="drawerForm.priority">
-                        <el-radio value="high">高</el-radio>
-                        <el-radio value="medium">中</el-radio>
-                        <el-radio value="low">低</el-radio>
-                      </el-radio-group>
-                    </el-form-item>
-                    <el-form-item label="描述">
-                      <el-input v-model="drawerForm.desc" type="textarea" :rows="4" />
-                    </el-form-item>
-                    <el-form-item>
-                      <el-button type="primary" @click="drawerVisible = false">保存</el-button>
-                    </el-form-item>
-                  </el-form>
-                </el-drawer>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="消息提示组合">
-                <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-                  <el-button @click="showMessage('success')">成功消息</el-button>
-                  <el-button @click="showMessage('warning')">警告消息</el-button>
-                  <el-button @click="showMessage('error')">错误消息</el-button>
-                  <el-button @click="showMessage('info')">信息消息</el-button>
-                  <el-button type="primary" @click="showNotification">通知</el-button>
-                  <el-button type="warning" @click="showMsgBox">MessageBox</el-button>
-                </div>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="Alert 警报">
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                  <el-alert title="成功提示" type="success" show-icon />
-                  <el-alert title="警告提示" type="warning" show-icon />
-                  <el-alert title="错误提示" type="error" show-icon />
-                  <el-alert title="信息提示" type="info" show-icon description="这是一段描述文字" />
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="24">
-              <el-card header="Popconfirm 气泡确认 & Tooltip">
-                <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
-                  <el-popconfirm
-                    title="确定要删除吗？"
-                    confirm-button-text="确认"
-                    cancel-button-text="取消"
-                    @confirm="onPopconfirm"
-                  >
-                    <template #reference>
-                      <el-button type="danger">删除（气泡确认）</el-button>
-                    </template>
-                  </el-popconfirm>
-
-                  <el-tooltip content="这是tooltip提示" placement="top">
-                    <el-button>悬停提示</el-button>
-                  </el-tooltip>
-
-                  <el-popover placement="bottom" :width="200" trigger="click">
-                    <template #reference>
-                      <el-button>点击弹出</el-button>
-                    </template>
-                    <div>
-                      <p>这是 Popover 的内容区域</p>
-                      <el-button size="small" type="primary">操作</el-button>
-                    </div>
-                  </el-popover>
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-        </el-tab-pane>
-
-        <!-- ===== Tab 4: 导航组件 ===== -->
-        <el-tab-pane label="导航组件" name="nav">
-          <el-row :gutter="20">
-            <el-col :span="24">
-              <el-card header="面包屑 Breadcrumb">
-                <el-breadcrumb separator="/">
-                  <el-breadcrumb-item>首页</el-breadcrumb-item>
-                  <el-breadcrumb-item>组件</el-breadcrumb-item>
-                  <el-breadcrumb-item>导航</el-breadcrumb-item>
-                  <el-breadcrumb-item>面包屑</el-breadcrumb-item>
-                </el-breadcrumb>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="下拉菜单 Dropdown">
-                <div style="display: flex; gap: 16px; flex-wrap: wrap;">
-                  <el-dropdown @command="onDropdownCommand">
-                    <el-button type="primary">
-                      下拉菜单<el-icon class="el-icon--right"><arrow-down /></el-icon>
-                    </el-button>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item command="action1">选项一</el-dropdown-item>
-                        <el-dropdown-item command="action2">选项二</el-dropdown-item>
-                        <el-dropdown-item command="action3" divided>选项三</el-dropdown-item>
-                        <el-dropdown-item command="action4" disabled>选项四（禁用）</el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-
-                  <el-dropdown split-button type="success" @command="onDropdownCommand" @click="showMessage('success')">
-                    拆分按钮
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item command="split1">操作 A</el-dropdown-item>
-                        <el-dropdown-item command="split2">操作 B</el-dropdown-item>
-                        <el-dropdown-item command="split3">操作 C</el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-                </div>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="步骤条 Steps">
-                <el-steps :active="stepsActive" finish-status="success" align-center>
-                  <el-step title="创建账号" description="填写基本信息" />
-                  <el-step title="验证邮箱" description="确认邮箱地址" />
-                  <el-step title="设置偏好" description="选择偏好设置" />
-                  <el-step title="完成" description="开始使用" />
-                </el-steps>
-                <div style="margin-top: 12px; text-align: center;">
-                  <el-button @click="stepsActive = Math.max(0, stepsActive - 1)">上一步</el-button>
-                  <el-button type="primary" @click="stepsActive = Math.min(3, stepsActive + 1)">下一步</el-button>
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="折叠面板 Collapse">
-                <el-collapse v-model="activeCollapse">
-                  <el-collapse-item title="一致性 Consistency" name="1">
-                    <p>与现实生活一致：与现实生活的流程、逻辑保持一致，遵循用户习惯的语言和概念。</p>
-                  </el-collapse-item>
-                  <el-collapse-item title="反馈 Feedback" name="2">
-                    <p>控制反馈：通过界面样式和交互动效让用户可以清晰的感知自己的操作。</p>
-                  </el-collapse-item>
-                  <el-collapse-item title="效率 Efficiency" name="3">
-                    <p>简化流程：设计简洁直觉的操作流程。</p>
-                  </el-collapse-item>
-                  <el-collapse-item title="可控 Controllability" name="4">
-                    <p>用户决策：根据场景可给予用户操作建议或安全提示，但不能代替用户做决策。</p>
-                  </el-collapse-item>
-                </el-collapse>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="时间线 Timeline">
-                <el-timeline>
-                  <el-timeline-item timestamp="2026-02-28" placement="top" type="primary">
-                    <h4>集成 Element Plus Demo</h4>
-                    <p>在 AutoPilot demo 中引入 Element Plus 全量组件以验证交互</p>
-                  </el-timeline-item>
-                  <el-timeline-item timestamp="2026-02-25" placement="top" type="success">
-                    <h4>完成核心 Agent Loop</h4>
-                    <p>实现增量消费模型和快照优先级机制</p>
-                  </el-timeline-item>
-                  <el-timeline-item timestamp="2026-02-20" placement="top" type="warning">
-                    <h4>工具注册系统</h4>
-                    <p>实现 ToolRegistry 与 5 个内置浏览器工具</p>
-                  </el-timeline-item>
-                  <el-timeline-item timestamp="2026-02-15" placement="top" type="info">
-                    <h4>项目启动</h4>
-                    <p>初始化项目结构和基础架构</p>
-                  </el-timeline-item>
-                </el-timeline>
-              </el-card>
-            </el-col>
-          </el-row>
-        </el-tab-pane>
-
-        <!-- ===== Tab 5: 按钮与其他 ===== -->
-        <el-tab-pane label="按钮与其他" name="buttons">
-          <el-row :gutter="20">
-            <el-col :span="24">
-              <el-card header="按钮组合">
-                <div style="display: flex; flex-direction: column; gap: 16px;">
-                  <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-                    <el-button>默认按钮</el-button>
-                    <el-button type="primary">主要按钮</el-button>
-                    <el-button type="success">成功按钮</el-button>
-                    <el-button type="info">信息按钮</el-button>
-                    <el-button type="warning">警告按钮</el-button>
-                    <el-button type="danger">危险按钮</el-button>
-                  </div>
-                  <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-                    <el-button plain>朴素按钮</el-button>
-                    <el-button type="primary" plain>主要按钮</el-button>
-                    <el-button type="success" plain>成功按钮</el-button>
-                    <el-button type="info" plain>信息按钮</el-button>
-                    <el-button type="warning" plain>警告按钮</el-button>
-                    <el-button type="danger" plain>危险按钮</el-button>
-                  </div>
-                  <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-                    <el-button round>圆角按钮</el-button>
-                    <el-button type="primary" round>主要按钮</el-button>
-                    <el-button type="success" round>成功按钮</el-button>
-                    <el-button :loading="btnLoading" type="primary" @click="handleBtnLoading">加载中</el-button>
-                    <el-button type="primary" disabled>禁用按钮</el-button>
-                    <el-button type="primary" size="large">大按钮</el-button>
-                    <el-button type="primary" size="small">小按钮</el-button>
-                  </div>
-                  <div>
-                    <el-button-group>
-                      <el-button type="primary">上一页</el-button>
-                      <el-button type="primary">下一页</el-button>
-                    </el-button-group>
-                  </div>
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="树形组件 Tree">
-                <el-tree
-                  :data="treeData"
-                  show-checkbox
-                  default-expand-all
-                  node-key="id"
-                  highlight-current
-                  :props="{ children: 'children', label: 'label' }"
-                  @check-change="onTreeCheckChange"
-                />
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="自动补全 Autocomplete">
-                <el-form label-width="100px">
-                  <el-form-item label="搜索建议">
-                    <el-autocomplete
-                      v-model="autocompleteVal"
-                      :fetch-suggestions="querySearch"
-                      placeholder="请输入关键词"
-                      clearable
-                      @select="onAutoSelect"
-                    />
-                  </el-form-item>
-                </el-form>
-
-                <el-divider content-position="left">Avatar & Space</el-divider>
-                <el-space wrap>
-                  <el-avatar :size="50">UA</el-avatar>
-                  <el-avatar :size="50" style="background: #409eff">EP</el-avatar>
-                  <el-avatar :size="50" style="background: #67c23a">AP</el-avatar>
-                </el-space>
-
-                <el-divider content-position="left">Skeleton</el-divider>
-                <el-skeleton :rows="3" animated />
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-row :gutter="20" style="margin-top: 20px">
-            <el-col :span="12">
-              <el-card header="数字统计 Statistic">
-                <el-row :gutter="20">
-                  <el-col :span="12">
-                    <el-statistic title="日活用户" :value="268500" />
-                  </el-col>
-                  <el-col :span="12">
-                    <el-statistic title="月活跃" :value="138">
-                      <template #suffix>
-                        <span style="font-size: 14px">万</span>
-                      </template>
-                    </el-statistic>
-                  </el-col>
-                </el-row>
-              </el-card>
-            </el-col>
-
-            <el-col :span="12">
-              <el-card header="图片预览 Image">
-                <div style="display: flex; gap: 10px;">
-                  <el-image
-                    style="width: 100px; height: 100px"
-                    src="https://picsum.photos/200/200?random=1"
-                    fit="cover"
-                    :preview-src-list="['https://picsum.photos/800/600?random=1', 'https://picsum.photos/800/600?random=2']"
-                    :initial-index="0"
-                  />
-                  <el-image
-                    style="width: 100px; height: 100px"
-                    src="https://picsum.photos/200/200?random=2"
-                    fit="cover"
-                  />
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-        </el-tab-pane>
-
-        <el-tab-pane label="Prompt 验证" name="prompt-check">
-          <el-row :gutter="20">
-            <el-col :span="16">
-              <el-card header="同名项 + 关联元素切换验证">
-
-                <el-form label-width="100px" size="default">
-                  <el-form-item label="仓库路径">
-                    <div class="prompt-check-row" :class="{ 'is-blurred': promptDemoTopBlurred }">
-                      <div class="path-cell">
-                        <el-input model-value="/team/repo-b" readonly />
-                      </div>
-                      <span
-                        class="path-open path-open-decoy"
-                        role="button"
-                        tabindex="0"
-                        aria-label="打开"
-                        @mouseenter="onPromptDemoTopHover"
-                        @mousedown="onPromptDemoTopMouseDown"
-                        @click="onPromptDemoTopClick"
-                        @keydown.enter.prevent="onPromptDemoTopClick('enter')"
-                      >
-                        <span class="open-level">L2</span>
-                        <span class="open-shell">更多</span>
-                        <span class="open-core">打开</span>
-                      </span>
-                    </div>
-                  </el-form-item>
-
-                  <el-form-item label="仓库路径">
-                    <div class="prompt-check-row">
-                      <el-input model-value="/team/repo-b" readonly />
-                      <span
-                        class="path-open path-open-real"
-                        role="button"
-                        tabindex="0"
-                        aria-label="打开详情"
-                        data-level="4"
-                        @click="onPromptDemoRealOpen('/team/repo-b')"
-                      >
-                        <span class="open-level">L4</span>
-                        <span class="open-chain">
-                          <span>操作</span>
-                          <span>进入</span>
-                          <span class="open-core">打开</span>
-                        </span>
-                      </span>
-                    </div>
-                  </el-form-item>
-                </el-form>
-
-                <div class="prompt-check-actions">
-                  <el-button size="small" @click="clearPromptDemoEvents">清空事件日志</el-button>
-                </div>
-              </el-card>
-            </el-col>
-
-            <el-col :span="8">
-              <el-card header="事件日志">
-                <div class="prompt-check-log">
-                  <div v-if="promptDemoEvents.length === 0" class="prompt-check-empty">暂无事件</div>
-                  <div v-for="(event, idx) in promptDemoEvents" :key="`${event}-${idx}`" class="prompt-check-log-item">
-                    {{ event }}
-                  </div>
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-
-          <el-dialog v-model="promptDemoDialogVisible" title="仓库详情" width="520px">
-            <el-descriptions :column="1" border>
-              <el-descriptions-item label="路径">{{ promptDemoSelectedPath }}</el-descriptions-item>
-              <el-descriptions-item label="状态">已打开</el-descriptions-item>
-            </el-descriptions>
-            <template #footer>
-              <el-button @click="promptDemoDialogVisible = false">关闭</el-button>
+                <el-tag type="primary" size="small">{{ currentRouteMeta?.code || 'workspace:overview' }}</el-tag>
+              </div>
             </template>
-          </el-dialog>
-        </el-tab-pane>
-      </el-tabs>
+
+            <div v-for="group in sidebarGroups" :key="group.title" class="menu-group">
+              <div class="menu-group-title">{{ group.title }}</div>
+              <el-menu :default-active="route.path" router class="route-menu">
+                <el-menu-item v-for="item in group.children" :key="item.path" :index="item.path">
+                  <div class="menu-item-main">
+                    <span>{{ item.title }}</span>
+                    <small>{{ item.caption }}</small>
+                  </div>
+                </el-menu-item>
+              </el-menu>
+            </div>
+          </el-card>
+        </el-aside>
+
+        <el-main class="route-main">
+          <el-card class="route-meta-card" shadow="never">
+            <div class="route-meta-top">
+              <div>
+                <div class="route-section">{{ currentRouteMeta?.section || '工作台' }}</div>
+                <h2>{{ currentRouteMeta?.title || '场景总览' }}</h2>
+                <p>{{ currentRouteMeta?.description || '用于测试 AI 跨菜单导航、深层页面定位和复杂创建链路。' }}</p>
+              </div>
+              <div class="route-path-box">
+                <span class="route-path-label">当前路径</span>
+                <strong>{{ route.path }}</strong>
+              </div>
+            </div>
+
+            <div class="route-breadcrumbs">
+              <el-breadcrumb separator="/">
+                <el-breadcrumb-item v-for="(item, idx) in currentRouteMeta?.breadcrumbs || []" :key="`${item}-${idx}`">
+                  {{ item }}
+                </el-breadcrumb-item>
+              </el-breadcrumb>
+            </div>
+
+            <div class="route-scenario">
+              <span class="route-scenario-label">测试目标：</span>
+              <span>{{ currentRouteMeta?.scenario }}</span>
+            </div>
+          </el-card>
+
+          <router-view />
+        </el-main>
+      </el-container>
     </el-main>
 
-    <!-- ======= 底部聊天面板 ======= -->
     <div class="dock" data-autopilot-ignore>
       <div class="dock-toggle" @click="dockExpanded = !dockExpanded">
         {{ dockExpanded ? '▲ 聊天面板 ▲' : '▼ 聊天面板 ▼' }}
@@ -774,14 +101,9 @@
         </div>
       </div>
       <div class="quick-actions">
-        <el-button size="small" @click="sendQuick('把用户名填为 test_user，密码填为 123456')">填表单</el-button>
-        <el-button size="small" @click="sendQuick('在城市选择器中选择上海')">选城市</el-button>
-        <el-button size="small" @click="sendQuick('把单选框选为选项二，然后打开开关')">改单选+开关</el-button>
-        <el-button size="small" @click="sendQuick('切换到数据展示tab，然后在表格搜索框输入张')">搜索表格</el-button>
-        <el-button size="small" @click="sendQuick('打开对话框，然后在活动名称输入框填写 团建活动')">操作弹窗</el-button>
-        <el-button size="small" @click="sendQuick('点击下一步按钮两次，让步骤条到第三步')">步骤条</el-button>
-        <el-button size="small" @click="sendQuick('把评分设为4星，然后设置滑块值为75')">评分滑块</el-button>
-        <el-button size="small" @click="sendQuick('切换到 Prompt 验证 tab，点击仓库路径 /team/repo-b 对应的打开按钮，查看弹窗内容')">Prompt验证</el-button>
+        <el-button v-for="action in quickActions" :key="action.label" size="small" @click="sendQuick(action.prompt)">
+          {{ action.label }}
+        </el-button>
         <el-button size="small" @click="clearHistory">清空记忆</el-button>
       </div>
       <div class="input-bar">
@@ -798,14 +120,15 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, nextTick, onMounted, watch } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
 import { ElMessage, ElNotification, ElMessageBox } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
 import { WebAgent } from '../src/web/index.js'
 import type { ToolCallResult } from '../src/core/tool-registry.js'
+import { demoMenuGroups, getDemoRouteMeta } from './router'
 
 // ===== Agent =====
 const agent = new WebAgent({
-  token: import.meta.env.DEEPSEEK_TOKEN ?? '',
+  token: (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.DEEPSEEK_TOKEN ?? '',
   provider: 'deepseek',
   model: 'deepseek-chat',
   baseURL: '/api',
@@ -813,10 +136,49 @@ const agent = new WebAgent({
 })
 agent.registerTools()
 agent.setSystemPrompt('demo', [
-  'You are operating the Element Plus demo page.',
+  'You are operating a routed enterprise admin demo page.',
+  'Use the visible sidebar menu, breadcrumb, route info card, forms, drawers, nested dialogs, tabs, trees, and tables to navigate and complete tasks.',
   'Prefer minimal action arrays and complete independent visible actions in one round.',
   'Do not repeat verification calls unless the user explicitly asks for verification.',
 ].join(' '))
+
+const route = useRoute()
+const sidebarGroups = demoMenuGroups
+const currentRouteMeta = computed(() => getDemoRouteMeta(route))
+const quickActions = computed(() => [
+  {
+    label: '总览路线',
+    prompt: '先查看左侧业务导航，确认有哪些深层级测试页面。',
+  },
+  {
+    label: '创建发布单',
+    prompt: '进入运营中心的“新建发布单”页面，创建一个名为「支付域夜间灰度发布」的发布单，并提交审批。',
+  },
+  {
+    label: '准入申请',
+    prompt: '进入采购中心的供应商准入申请页，点击“新建准入申请”，创建一个华东区域的物流供应商申请并提交。',
+  },
+  {
+    label: '企业客户',
+    prompt: '进入主数据中心的新建企业客户页面，创建企业客户“星云零售集团”，并填写结算与联系人信息。',
+  },
+  {
+    label: '开通实例',
+    prompt: '进入平台配置的开通应用实例页面，点击“开通新实例”，为租户“华北一区”开通 BI 分析平台实例并确认。',
+  },
+  {
+    label: '对账批次',
+    prompt: '进入财务中心的新建对账批次页面，创建一个名为「2026-03 华东渠道对账批次」的批次，并确认生成。',
+  },
+  {
+    label: '工单升级',
+    prompt: '进入服务台的工单升级申请页面，搜索支付，对支付工单发起升级，并选择支付故障升级群后提交。',
+  },
+  {
+    label: '权限模板',
+    prompt: '进入安全中心的新建权限模板页面，创建一个“区域运营管理员模板”，切到资源组页并添加一个资源组。',
+  },
+])
 
 // ===== 连接状态 =====
 const connected = ref(false)
@@ -980,6 +342,44 @@ const promptDemoTopBlurred = ref(false)
 const promptDemoTopTouched = ref(false)
 let promptDemoBlurTimer: number | undefined
 
+// ===== 搜索回车触发验证 =====
+const enterSearchQuery = ref('')
+const enterSearchAppliedQuery = ref('')
+const enterSearchApplied = ref(false)
+const enterSearchEvents = ref<string[]>([])
+const enterSearchData = [
+  { name: 'autopilot', lang: 'TypeScript', stars: 128 },
+  { name: 'vue-next', lang: 'TypeScript', stars: 4200 },
+  { name: 'react', lang: 'JavaScript', stars: 21000 },
+  { name: 'angular', lang: 'TypeScript', stars: 9500 },
+  { name: 'svelte', lang: 'JavaScript', stars: 7600 },
+  { name: 'vite', lang: 'TypeScript', stars: 6300 },
+  { name: 'webpack', lang: 'JavaScript', stars: 6400 },
+  { name: 'esbuild', lang: 'Go', stars: 3700 },
+]
+const enterSearchResults = computed(() => {
+  if (!enterSearchApplied.value || !enterSearchAppliedQuery.value) return enterSearchData
+  const q = enterSearchAppliedQuery.value.toLowerCase()
+  return enterSearchData.filter(r => r.name.toLowerCase().includes(q) || r.lang.toLowerCase().includes(q))
+})
+function onEnterSearch() {
+  enterSearchAppliedQuery.value = enterSearchQuery.value
+  enterSearchApplied.value = true
+  enterSearchEvents.value.unshift(`SEARCH "${enterSearchQuery.value}" → ${enterSearchResults.value.length} results`)
+}
+function onClearEnterSearch() {
+  enterSearchQuery.value = ''
+  enterSearchAppliedQuery.value = ''
+  enterSearchApplied.value = false
+  enterSearchEvents.value.unshift('CLEAR')
+}
+function onResetEnterSearch() {
+  enterSearchQuery.value = ''
+  enterSearchAppliedQuery.value = ''
+  enterSearchApplied.value = false
+  enterSearchEvents.value = []
+}
+
 // ===== Tree =====
 const treeData = [
   {
@@ -1131,7 +531,7 @@ function onAddRow() {
     name: `新用户${tableData.value.length + 1}`,
     age: 20,
     email: `user${tableData.value.length + 1}@test.com`,
-    city: '未知',
+    city: '北京',
     status: '活跃',
   })
   ElMessage.success('已新增一行')
@@ -1326,9 +726,137 @@ html, body {
 }
 
 .main-content {
-  max-width: 1400px;
+  max-width: 1580px;
   margin: 0 auto;
   padding: 20px !important;
+}
+
+.route-layout {
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.route-sidebar {
+  position: sticky;
+  top: 20px;
+}
+
+.route-nav-card {
+  border-radius: 16px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sidebar-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.sidebar-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.menu-group + .menu-group {
+  margin-top: 18px;
+}
+
+.menu-group-title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #909399;
+}
+
+.route-menu {
+  border-right: 0;
+}
+
+.menu-item-main {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+}
+
+.menu-item-main small {
+  color: #909399;
+}
+
+.route-main {
+  padding: 0 !important;
+}
+
+.route-meta-card {
+  margin-bottom: 20px;
+  border-radius: 16px;
+}
+
+.route-meta-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.route-meta-top h2 {
+  margin: 8px 0;
+  font-size: 28px;
+  color: #303133;
+}
+
+.route-meta-top p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+}
+
+.route-section {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.route-path-box {
+  min-width: 260px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f7f9fc;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.route-path-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.route-breadcrumbs {
+  margin-top: 16px;
+}
+
+.route-scenario {
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+}
+
+.route-scenario-label {
+  font-weight: 700;
+  color: #303133;
 }
 
 /* 聊天面板 */

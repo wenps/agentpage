@@ -12,5 +12,8 @@
     "element-plus": "^2.13.2",
     "vite": "^7.3.1",
     "vue": "^3.5.29"
+  },
+  "dependencies": {
+    "vue-router": "^4.6.4"
   }
 }
