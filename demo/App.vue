@@ -40,7 +40,10 @@
                   <div class="sidebar-title">业务导航</div>
                   <div class="sidebar-subtitle">模拟真实 B 端项目的多级菜单</div>
                 </div>
-                <el-tag type="primary" size="small">{{ currentRouteMeta?.code || 'workspace:overview' }}</el-tag>
+                <div class="sidebar-header-actions">
+                  <el-button size="small" @click="quickDrawerVisible = true">快捷指令</el-button>
+                  <el-tag type="primary" size="small">{{ currentRouteMeta?.code || 'workspace:overview' }}</el-tag>
+                </div>
               </div>
             </template>
 
@@ -91,30 +94,20 @@
       </el-container>
     </el-main>
 
-    <div class="dock" data-autopilot-ignore>
-      <div class="dock-toggle" @click="dockExpanded = !dockExpanded">
-        {{ dockExpanded ? '▲ 聊天面板 ▲' : '▼ 聊天面板 ▼' }}
-      </div>
-      <div v-show="dockExpanded" ref="chatContainer" class="chat-panel">
-        <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.type]">
-          {{ msg.text }}
+    <!-- 快捷指令抽屉 -->
+    <el-drawer v-model="quickDrawerVisible" title="快捷指令" direction="rtl" size="360px">
+      <div class="quick-drawer-list">
+        <div
+          v-for="action in quickActions"
+          :key="action.label"
+          class="quick-drawer-item"
+          @click="sendQuick(action.prompt)"
+        >
+          <div class="quick-drawer-item-label">{{ action.label }}</div>
+          <div class="quick-drawer-item-desc">{{ action.prompt }}</div>
         </div>
       </div>
-      <div class="quick-actions">
-        <el-button v-for="action in quickActions" :key="action.label" size="small" @click="sendQuick(action.prompt)">
-          {{ action.label }}
-        </el-button>
-        <el-button size="small" @click="clearHistory">清空记忆</el-button>
-      </div>
-      <div class="input-bar">
-        <el-input
-          v-model="chatInput"
-          placeholder="输入要执行的网页操作"
-          @keyup.enter="handleSend"
-        />
-        <el-button type="primary" @click="handleSend">发送</el-button>
-      </div>
-    </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -123,7 +116,7 @@ import { ref, computed, reactive, nextTick, onMounted, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { ElMessage, ElNotification, ElMessageBox } from 'element-plus'
 import { WebAgent } from '../src/web/index.js'
-import type { ToolCallResult } from '../src/core/tool-registry.js'
+
 import { demoMenuGroups, getDemoRouteMeta } from './router'
 
 // ===== Agent =====
@@ -132,7 +125,13 @@ const agent = new WebAgent({
   provider: 'deepseek',
   model: 'deepseek-chat',
   baseURL: '/api',
-  stream: true,
+  stream: false,
+  panel: {
+    enableMask: true,
+    expanded: false,
+    title: 'AutoPilot',
+    placeholder: '输入要执行的网页操作...',
+  },
 })
 agent.registerTools()
 agent.setSystemPrompt('demo', [
@@ -188,11 +187,8 @@ const streamMode = ref('json')
 const dryRun = ref(false)
 const memory = ref(false)
 
-// ===== 聊天 =====
-const messages = ref<{ type: string; text: string }[]>([])
-const chatInput = ref('')
-const chatContainer = ref<HTMLElement>()
-const dockExpanded = ref(true)
+// ===== 快捷指令抽屉 =====
+const quickDrawerVisible = ref(false)
 
 // ===== 当前激活 Tab =====
 const activeTab = ref('form')
@@ -428,31 +424,10 @@ const restaurants = [
   { value: 'Webpack' },
 ]
 
-// ===== 方法 =====
-function appendMsg(type: string, text: string) {
-  messages.value.push({ type, text })
-  nextTick(() => {
-    if (chatContainer.value) {
-      chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-    }
-  })
-}
-
-agent.callbacks = {
-  onRound: (round) => {
-    appendMsg('system', `系统思考中 (第 ${round + 1} 轮)...`)
-  },
-  onText: (text) => appendMsg('assistant', text),
-  onToolCall: (name, input) => appendMsg('tool-call', `${name}(${JSON.stringify(input)})`),
-  onToolResult: (_name, result: ToolCallResult) => {
-    const content = typeof result.content === 'string'
-      ? result.content
-      : JSON.stringify(result.content, null, 2)
-    appendMsg('tool-result', content)
-  },
-  onMetrics: (metrics) => {
-    appendMsg('system', `📊 ${JSON.stringify(metrics)}`)
-  },
+// ===== Agent 回调 =====
+// Panel 通过 wirePanel 自动处理消息展示，这里只扩展额外回调（不要覆盖整个 callbacks 对象）
+agent.callbacks.onMetrics = (metrics) => {
+  console.log('📊 Metrics:', metrics)
 }
 
 onMounted(() => {
@@ -461,50 +436,45 @@ onMounted(() => {
     token.value = savedToken
     connected.value = true
   }
-  appendMsg('system', `✅ 已注册工具：${agent.getTools().map(t => t.name).join(', ')}`)
+  // 面板中添加工具信息
+  agent.panel?.addMessage('tool', `✅ 已注册工具：${agent.getTools().map(t => t.name).join(', ')}`)
 })
 
 function onTokenChange() {
   if (token.value.trim()) {
     localStorage.setItem('ap_token', token.value.trim())
     connected.value = true
+    agent.setToken(token.value.trim())
   }
 }
+
+// 保持 agent 配置与顶栏选项实时同步（用户可能直接在 Panel 中发送消息）
+watch(model, (v) => agent.setModel(v))
+watch(streamMode, (v) => agent.setStream(v === 'stream'))
+watch(dryRun, (v) => agent.setDryRun(v))
 
 function onMemoryChange(val: boolean) {
   agent.setMemory(val)
   if (!val) agent.clearHistory()
-  appendMsg('system', val ? '🧠 记忆已开启' : '🧠 记忆已关闭并清空')
+  agent.panel?.addMessage('tool', val ? '🧠 记忆已开启' : '🧠 记忆已关闭并清空')
 }
 
-async function handleSend() {
-  const text = chatInput.value.trim()
-  if (!text) return
+function sendQuick(text: string) {
   if (!token.value.trim()) {
-    appendMsg('error', '请先填写 Token')
+    ElMessage.warning('请先填写 Token')
     return
   }
-  chatInput.value = ''
-  appendMsg('user', text)
+  quickDrawerVisible.value = false
+  // 同步最新配置到 agent
   agent.setToken(token.value.trim())
   agent.setModel(model.value)
   agent.setStream(streamMode.value === 'stream')
   agent.setDryRun(dryRun.value)
-  try {
-    await agent.chat(text)
-  } catch (error) {
-    appendMsg('error', `执行失败：${error instanceof Error ? error.message : String(error)}`)
+  // 通过面板发送（自动展开面板 + 显示消息）
+  if (agent.panel) {
+    agent.panel.show()
+    agent.panel.onSend?.(text)
   }
-}
-
-function sendQuick(text: string) {
-  chatInput.value = text
-  handleSend()
-}
-
-function clearHistory() {
-  agent.clearHistory()
-  appendMsg('system', '已清空历史')
 }
 
 // 表单
@@ -688,7 +658,7 @@ html, body {
 }
 
 .app-container {
-  padding-bottom: 300px;
+  padding-bottom: 40px;
 }
 
 .topbar {
@@ -750,6 +720,13 @@ html, body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .sidebar-title {
@@ -859,70 +836,37 @@ html, body {
   color: #303133;
 }
 
-/* 聊天面板 */
-.dock {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: #fff;
-  border-top: 1px solid #dcdfe6;
-  max-height: 46vh;
+/* 快捷指令抽屉 */
+.quick-drawer-list {
   display: flex;
   flex-direction: column;
-  z-index: 200;
-  box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
+  gap: 8px;
 }
 
-.dock-toggle {
-  text-align: center;
+.quick-drawer-item {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #ebeef5;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quick-drawer-item:hover {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.quick-drawer-item-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 4px;
+}
+
+.quick-drawer-item-desc {
   font-size: 12px;
   color: #909399;
-  padding: 4px;
-  cursor: pointer;
-  background: #fafafa;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.chat-panel {
-  flex: 1;
-  min-height: 120px;
-  overflow: auto;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.msg {
-  max-width: 88%;
-  padding: 8px 12px;
-  border-radius: 8px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 12px;
   line-height: 1.5;
-}
-.msg.user { align-self: flex-end; background: #ecf5ff; color: #409eff; }
-.msg.assistant { align-self: flex-start; background: #f4f4f5; color: #303133; }
-.msg.tool-call { align-self: flex-start; background: #f0f9eb; border-left: 3px solid #67c23a; color: #303133; }
-.msg.tool-result { align-self: flex-start; background: #ecf5ff; border-left: 3px solid #409eff; color: #303133; }
-.msg.system { align-self: flex-start; background: #fdf6ec; color: #e6a23c; }
-.msg.error { align-self: flex-start; background: #fef0f0; color: #f56c6c; }
-
-.quick-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 8px 10px;
-  border-top: 1px solid #ebeef5;
-}
-
-.input-bar {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  border-top: 1px solid #ebeef5;
 }
 
 .badge-item {
