@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.42
+
+### 修复
+
+- **Agent Loop 健壮性增强（兼容 MiniMax 等不严格遵循协议的模型）**：
+  - 修复 remaining 被模型污染：无工具调用轮次仅接受 `REMAINING: DONE` 收敛，不再采纳模型自行改写的非空 remaining（如 MiniMax 首轮返回"你好，请告诉我需要执行的操作"覆盖用户原始任务）
+  - 修复空转检测误判：空转检测改为基于实际执行的工具（`executedTaskCalls`），被框架拦截的冗余 `page_info` 不再计入只读轮次
+  - 修复重复批次误判：全部工具调用被框架拦截（无实际执行）时，视同"有错误"轮次，不触发"重复批次即停机"
+  - 放宽协议缺失阈值：停机阈值从 3 轮放宽至 5 轮，提醒注入从 2 轮放宽至 3 轮，适配 MiniMax 等系统性不输出 REMAINING 的模型
+
+### 变更
+
+- **Demo 移除 Vite proxy 依赖**：
+  - WebAgent 不再配置 `baseURL: '/api'`，直接使用 provider 默认端点
+  - 用户只需配 `provider` + `token` 即可使用，无需额外代理设置
+
 ## 0.0.41
 
 ### 新增
