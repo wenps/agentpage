@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.0.41
+
+### 新增
+
+- **MiniMax 模型接入**：
+  - 新增 `minimax` provider，基于 OpenAI 兼容协议（`https://api.minimaxi.com/v1`）
+  - 推荐模型：`MiniMax-M2.5` / `MiniMax-M2.5-highspeed`
+  - 与 DeepSeek / Doubao / Qwen 同模式，复用 OpenAIClient 零额外依赖
+
+- **遮罩透明度可配置（`maskOpacity`）**：
+  - `PanelOptions` 新增 `maskOpacity` 参数（默认 `0.15`），支持自定义操作遮罩透明度
+  - 遮罩背景模糊从 `2px` 调整为 `1px`，视觉更轻量
+
+- **快照 class 名过滤（`classNameFilter`）**：
+  - `SnapshotOptions` 新增 `classNameFilter` 配置（`string[] | false`）
+  - 默认启用内置正则规则，按组件关键词（`-button`、`-input`、`-table`、`-form` 等）剔除 UI 框架噪音类名
+  - 覆盖 Element Plus / Ant Design / TDesign / Arco / Vant / Naive UI 等主流框架
+  - 保留悬浮层相关类名（dialog / modal / drawer / popover / tooltip / dropdown）以便 AI 识别弹层结构
+  - 传 `false` 可禁用过滤，传自定义正则数组可替换默认规则
+
 ## 0.0.40
 
 ### 新增

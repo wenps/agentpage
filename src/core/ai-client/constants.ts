@@ -13,6 +13,7 @@ export const PROVIDER_ENDPOINTS: Record<string, string> = {
   deepseek: "https://api.deepseek.com",
   doubao: "https://ark.cn-beijing.volces.com/api/v3",
   qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  minimax: "https://api.minimaxi.com/v1",
 };
 
 // ─── 共享工具函数 ───

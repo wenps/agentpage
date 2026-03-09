@@ -11,15 +11,16 @@
         <el-input
           v-model="token"
           type="password"
-          placeholder="DeepSeek Token"
+          placeholder="MiniMax Token"
           size="small"
           style="width: 260px"
           show-password
           @change="onTokenChange"
         />
-        <el-select v-model="model" size="small" style="width: 160px">
-          <el-option label="deepseek-chat" value="deepseek-chat" />
-          <el-option label="deepseek-reasoner" value="deepseek-reasoner" />
+        <el-select v-model="model" size="small" style="width: 200px">
+          <el-option label="MiniMax-M2.5" value="MiniMax-M2.5" />
+          <el-option label="MiniMax-M2.5-highspeed" value="MiniMax-M2.5-highspeed" />
+          <el-option label="MiniMax-M2.1" value="MiniMax-M2.1" />
         </el-select>
         <el-select v-model="streamMode" size="small" style="width: 100px">
           <el-option label="stream" value="stream" />
@@ -121,9 +122,9 @@ import { demoMenuGroups, getDemoRouteMeta } from './router'
 
 // ===== Agent =====
 const agent = new WebAgent({
-  token: (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.DEEPSEEK_TOKEN ?? '',
-  provider: 'deepseek',
-  model: 'deepseek-chat',
+  token: (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.MINIMAX_TOKEN ?? '',
+  provider: 'minimax',
+  model: 'MiniMax-M2.5',
   baseURL: '/api',
   stream: false,
   panel: {
@@ -182,7 +183,7 @@ const quickActions = computed(() => [
 // ===== 连接状态 =====
 const connected = ref(false)
 const token = ref('')
-const model = ref('deepseek-chat')
+const model = ref('MiniMax-M2.5')
 const streamMode = ref('json')
 const dryRun = ref(false)
 const memory = ref(false)

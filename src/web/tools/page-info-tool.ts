@@ -64,7 +64,26 @@ export type SnapshotOptions = {
    * 仅影响 `listeners="..."` 文本输出，不影响内部交互判定与 hash 分配。
    */
   listenerEvents?: string[];
+  /**
+   * class 名过滤正则列表（默认开启常用 UI 框架过滤）。
+   * 每项为正则字符串，class 名匹配任一正则即从快照中剔除。
+   * - 默认（undefined）：启用内置规则，剔除 Element Plus / AntD / BK / TDesign / Arco / Vant / Naive 等。
+   * - 自定义 string[]：替换默认规则，使用自定义正则。
+   * - false：禁用过滤，保留所有 class。
+   */
+  classNameFilter?: string[] | false;
 };
+
+/**
+ * 内置 class 名过滤正则（剔除常见 UI 框架噪音类名）。
+ * 通过匹配组件关键词（如 -button、-input、-dialog）统一覆盖所有框架，
+ * 无需逐一枚举框架前缀。
+ */
+const DEFAULT_CLASSNAME_FILTERS: string[] = [
+  // 通用组件关键词：匹配 class 中含 -button / -input 等的类名
+  // 保留悬浮层相关类名（dialog/modal/drawer/popover/tooltip/popper/overlay/popup/dropdown）以便 AI 识别弹层结构
+  "-(?:button|btn|input|select|option|tag|badge|menu|menuitem|tab|tabs|table|thead|tbody|tfoot|th|td|form|form-item|field|label|checkbox|radio|switch|slider|rate|upload|tree|collapse|breadcrumb|pagination|pager|step|steps|progress|cascader|transfer|picker|date-picker|time-picker|color-picker|auto-complete|autocomplete|card|alert|message|notification|notify|toast|spin|spinner|loading|skeleton|empty|result|avatar|icon|image|divider|space|scrollbar|affix|anchor|back-top|backtop|watermark|segmented|descriptions|statistic|countdown|row|col|grid|layout|container|header|footer|aside|main|sidebar|wrapper|inner|content|prefix|suffix|append|prepend|cell|column|group|panel|item|list|body|close|arrow|placeholder|trigger|reference|transition)",
+];
 
 /** 快照属性值最大保留长度（超出截断）。 */
 const MAX_SNAPSHOT_ATTR_VALUE_LENGTH = 120;
@@ -190,6 +209,12 @@ export function generateSnapshot(
       .map(normalizeSnapshotListenerEvent)
       .filter(Boolean),
   );
+  const classNameFilterRegexps: RegExp[] | null = opts.classNameFilter === false
+    ? null
+    : (opts.classNameFilter && opts.classNameFilter.length > 0
+        ? opts.classNameFilter
+        : DEFAULT_CLASSNAME_FILTERS
+      ).map(p => new RegExp(p));
 
   let emittedNodes = 0;
   let truncatedByNodeBudget = false;
@@ -538,7 +563,8 @@ export function generateSnapshot(
     const className = el.getAttribute("class")?.trim();
     if (className) {
       const cls = className.split(/\s+/)
-        .find(c => c && !c.startsWith("data-v-") && c.length < 25 && !/^[a-z]{1,2}\d|^_|^css-/.test(c));
+        .find(c => c && !c.startsWith("data-v-") && c.length < 25 && !/^[a-z]{1,2}\d|^_|^css-/.test(c)
+          && !(classNameFilterRegexps && classNameFilterRegexps.some(r => r.test(c))));
       if (cls) attrs.push(`class="${cls}"`);
     }
 

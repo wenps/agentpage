@@ -24,6 +24,8 @@ export type PanelOptions = {
   mount?: boolean;
   /** 是否在 Agent 运行时自动显示操作遮罩（默认 true） */
   enableMask?: boolean;
+  /** 遮罩背景透明度（0–1，默认 0.15）。0 = 全透明，1 = 纯白不透明 */
+  maskOpacity?: number;
   /** 面板默认展开状态（默认 false，即收起状态，只显示 FAB） */
   expanded?: boolean;
   /** 面板标题（默认 "AutoPilot"） */
@@ -59,6 +61,7 @@ type PanelStatus = "idle" | "running" | "error";
 export default class Panel {
   private container: HTMLElement;
   private enableMask: boolean;
+  private maskOpacity: number;
   private title: string;
   private placeholder: string;
   private maskText: string;
@@ -93,6 +96,7 @@ export default class Panel {
   constructor(options: PanelOptions = {}) {
     this.container = options.container ?? document.body;
     this.enableMask = options.enableMask ?? true;
+    this.maskOpacity = Math.max(0, Math.min(1, options.maskOpacity ?? 0.15));
     this.expanded = options.expanded ?? false;
     this.title = options.title ?? "AutoPilot";
     this.placeholder = options.placeholder ?? "输入要执行的网页操作...";
@@ -287,6 +291,7 @@ export default class Panel {
     // ─── 操作遮罩 ───
     this.mask = document.createElement("div");
     this.mask.id = "autopilot-mask";
+    this.mask.style.setProperty("--ap-mask-opacity", String(this.maskOpacity));
     this.mask.innerHTML = `
       <div class="ap-mask-label">
         <div class="ap-mask-spinner"></div>
@@ -598,8 +603,12 @@ export default class Panel {
 
   private scrollToBottom(): void {
     if (!this.messagesEl) return;
+    // 双帧滚动：确保 DOM 渲染完毕后再滚到底部，避免新消息追加后高度未更新
     requestAnimationFrame(() => {
-      this.messagesEl!.scrollTop = this.messagesEl!.scrollHeight;
+      requestAnimationFrame(() => {
+        if (!this.messagesEl) return;
+        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      });
     });
   }
 

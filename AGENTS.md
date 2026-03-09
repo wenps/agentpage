@@ -42,6 +42,7 @@ src/
 │       ├── deepseek.ts
 │       ├── doubao.ts
 │       ├── qwen.ts
+│       ├── minimax.ts
 │       └── sse.ts
 └── web/
   ├── index.ts
@@ -208,6 +209,7 @@ src/
 - `deepseek.ts`：DeepSeek 协议
 - `doubao.ts`：豆包（Ark）OpenAI 兼容协议
 - `qwen.ts`：通义千问（DashScope）OpenAI 兼容协议
+- `minimax.ts`：MiniMax OpenAI 兼容协议
 - `sse.ts`：SSE 统一消费器
 - `custom.ts`：BaseAIClient 抽象封装
 - `constants.ts`：provider 默认端点与共享校验逻辑

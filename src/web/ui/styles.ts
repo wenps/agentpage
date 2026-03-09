@@ -35,11 +35,12 @@ export const PANEL_STYLES = /* css */ `
 
 /* ─── 操作遮罩 ─── */
 #autopilot-mask {
+  --ap-mask-opacity: 0.15;
   position: fixed;
   inset: 0;
   z-index: 99998;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(2px);
+  background: rgba(255, 255, 255, var(--ap-mask-opacity));
+  backdrop-filter: blur(1px);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--ap-transition);
@@ -86,7 +87,8 @@ export const PANEL_STYLES = /* css */ `
   position: fixed;
   z-index: 99999;
   width: 520px;
-  max-height: 680px;
+  height: min(75vh, 820px);
+  max-height: min(75vh, 820px);
   display: flex;
   flex-direction: column;
   background: var(--ap-bg);
@@ -255,14 +257,13 @@ export const PANEL_STYLES = /* css */ `
 
 /* ─── 消息区 ─── */
 .ap-messages {
-  flex: 1;
+  flex: 1 1 0;
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: 200px;
-  max-height: 420px;
+  min-height: 0;
   scroll-behavior: smooth;
 }
 .ap-messages::-webkit-scrollbar { width: 4px; }

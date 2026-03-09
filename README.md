@@ -259,7 +259,21 @@ Round 3: 执行 C → REMAINING: DONE
 | `autoSnapshot` | `boolean` | `true` | chat 前自动生成首轮快照 |
 | `snapshotOptions` | `SnapshotOptions` | `{}` | 快照参数（深度、裁剪、节点上限等） |
 | `roundStabilityWait` | `RoundStabilityWaitOptions` | `{ enabled: true }` | 轮次后稳定等待配置 |
-| `panel` | `boolean \| PanelOptions` | - | 内置 UI 面板配置 |
+| `panel` | `boolean \| PanelOptions` | - | 内置 UI 面板配置（见下方 PanelOptions 表） |
+
+### 面板配置（PanelOptions）
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `container` | `HTMLElement` | `document.body` | 面板挂载容器 |
+| `mount` | `boolean` | `true` | 构造时是否自动挂载到 DOM |
+| `enableMask` | `boolean` | `true` | Agent 运行时是否显示操作遮罩 |
+| `maskOpacity` | `number` | `0.15` | 遮罩背景透明度（0–1，0 全透明，1 纯白） |
+| `expanded` | `boolean` | `false` | 面板初始展开状态 |
+| `title` | `string` | `"AutoPilot"` | 面板标题 |
+| `placeholder` | `string` | `"输入要执行的网页操作..."` | 输入框占位文本 |
+| `maskText` | `string` | `"AutoPilot 正在操作页面"` | 遮罩提示文本 |
+| `emptyText` | `string` | `"发送一条消息，AI 将帮你操作页面"` | 空状态提示文本 |
 
 ### Provider 支持矩阵
 
@@ -271,6 +285,7 @@ Round 3: 执行 C → REMAINING: DONE
 | `deepseek` | `https://api.deepseek.com` | `deepseek-chat` |
 | `doubao` | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-1.5-pro-32k` |
 | `qwen` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| `minimax` | `https://api.minimaxi.com/v1` | `MiniMax-M2.5` |
 
 ### 快照参数（SnapshotOptions）
 
@@ -283,6 +298,7 @@ Round 3: 执行 C → REMAINING: DONE
 | `maxChildren` | `number` | `30` | 每个父节点最大子元素数 |
 | `maxTextLength` | `number` | `40` | 文本截断长度 |
 | `listenerEvents` | `string[]` | 9 种常用事件 | 快照输出的 listener 事件白名单 |
+| `classNameFilter` | `string[] \| false` | 内置 UI 框架过滤 | class 名过滤正则列表，匹配即剔除；`false` 禁用 |
 
 ### 轮次稳定等待（RoundStabilityWaitOptions）
 

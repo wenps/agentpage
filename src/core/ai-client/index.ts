@@ -12,6 +12,7 @@ import { AnthropicClient } from "./anthropic.js";
 import { DeepSeekClient } from "./deepseek.js";
 import { DoubaoClient } from "./doubao.js";
 import { QwenClient } from "./qwen.js";
+import { MiniMaxClient } from "./minimax.js";
 
 // Re-export 类型，方便外部统一从 ai-client 导入
 export type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "../types.js";
@@ -23,12 +24,13 @@ export { AnthropicClient, parseAnthropicStream } from "./anthropic.js";
 export { DeepSeekClient } from "./deepseek.js";
 export { DoubaoClient } from "./doubao.js";
 export { QwenClient } from "./qwen.js";
+export { MiniMaxClient } from "./minimax.js";
 
 // ─── 公共类型定义 ───
 
 /** AI 客户端配置（中）/ AI client configuration (EN). */
 export type AIClientConfig = {
-  /** AI 提供商: "openai" | "copilot" | "anthropic" | "deepseek" | "doubao" | "qwen" */
+  /** AI 提供商: "openai" | "copilot" | "anthropic" | "deepseek" | "doubao" | "qwen" | "minimax" */
   provider: string;
   /** 模型名称，如 "gpt-4o"、"claude-sonnet-4-20250514" */
   model: string;
@@ -88,9 +90,11 @@ export function createAIClient(config: AIClientConfig): AIClient {
       return new AnthropicClient(config);
     case "deepseek":
       return new DeepSeekClient(config);
+    case "minimax":
+      return new MiniMaxClient(config);
     default:
       throw new Error(
-        `Unknown AI provider: ${config.provider}. Supported: openai, copilot, anthropic, deepseek, doubao, qwen`,
+        `Unknown AI provider: ${config.provider}. Supported: openai, copilot, anthropic, deepseek, doubao, qwen, minimax`,
       );
   }
 }
