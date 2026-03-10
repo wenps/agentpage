@@ -261,6 +261,43 @@ export function isPotentialDomMutation(toolName: string, toolInput: unknown): bo
 }
 
 /**
+ * 判定动作是否为"确定性推进"——比 isPotentialDomMutation 更窄。
+ *
+ * 包含以下必定产生可见状态变化或属于显式用户意图的动作：
+ * - 表单输入类：fill / type / select_option / clear / check / uncheck
+ * - 键盘动作类：press（Enter 提交、Tab 切焦等均属用户显式操作）
+ * - 导航类：navigate.*
+ * - 自定义工具：非 SDK 内置工具（dom/navigate/page_info/wait/evaluate）
+ *   均由开发者注册、模型有意调用，视为确定性推进
+ *
+ * click 不在此列——因为 click 可能点了但完全没效果（如点击无 click listener 的元素）。
+ *
+ * 用途：协议缺失计数重置与豁免。仅当本轮有"确定性推进"时才重置协议缺失计数器，
+ * 避免模型反复点击无效目标导致死循环。
+ */
+export function isConfirmedProgressAction(toolName: string, toolInput: unknown): boolean {
+  if (toolName === "navigate") return true;
+
+  // 自定义工具（非 SDK 内置）——开发者注册的领域工具，视为确定性推进
+  const sdkBuiltinTools = ["dom", "navigate", "page_info", "wait", "evaluate"];
+  if (!sdkBuiltinTools.includes(toolName)) return true;
+
+  if (toolName !== "dom") return false;
+
+  const action = getToolAction(toolInput);
+  if (!action) return false;
+  return [
+    "fill",
+    "type",
+    "select_option",
+    "clear",
+    "check",
+    "uncheck",
+    "press",
+  ].includes(action);
+}
+
+/**
  * 采集找不到元素任务。
  *
  * 返回 null 表示当前结果不属于“元素未找到”，

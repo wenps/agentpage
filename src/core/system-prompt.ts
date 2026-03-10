@@ -156,7 +156,8 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
 
       "- Bracket tag may show ARIA role ([combobox], [slider]) as primary interaction hint.",
       "- listeners=\"...\" = bound event handlers (abbrevs below). Prefer targets with matching listeners.",
-      "- Click priority: clk/pdn/mdn, onclick, native link/button, role=button/link. Avoid focus-only or hover-only signals.",
+      "- Click target MUST have click signal: listeners containing clk/pdn/mdn, or onclick attr, or native <a>/<button>, or role=button/link. NEVER click elements with only blr/fcs (focus/blur) — they are not click targets.",
+      "- If the text you want to click has no click signal, look at its parent row/container or nearby sibling that does have clk listener.",
       "- No-effect fallback: try nearest actionable sibling/ancestor in same semantic group instead of repeating.",
 
       "- Batch fill/type/check/select_option freely within one round. A click always ends the round — send at most ONE click as the LAST action in a batch.",

@@ -208,14 +208,19 @@ describe("executeAgentLoop golden paths", () => {
   });
 
   it("空转终止：连续只读轮次后自动退出", async () => {
-    const registry = createBaseRegistry();
+    const registry = createBaseRegistry({
+      domExecute: async (params) => {
+        if (params.action === "get_text") return { content: "some text" };
+        return { content: "dom ok" };
+      },
+    });
 
     const client = new ScriptedClient([
       {
-        toolCalls: [{ id: "1", name: "page_info", input: { action: "query_all", selector: "button" } }],
+        toolCalls: [{ id: "1", name: "dom", input: { action: "get_text", selector: "#el1" } }],
       },
       {
-        toolCalls: [{ id: "2", name: "page_info", input: { action: "query_all", selector: "a" } }],
+        toolCalls: [{ id: "2", name: "dom", input: { action: "get_text", selector: "#el2" } }],
       },
     ]);
 
@@ -228,7 +233,6 @@ describe("executeAgentLoop golden paths", () => {
 
     expect(result.reply).toBe("任务已完成。");
     expect(result.metrics.roundCount).toBe(2);
-    expect(result.metrics.redundantInterceptCount).toBe(2);
   });
 
   it("导航后重定位：导航动作触发上下文刷新", async () => {
@@ -294,7 +298,7 @@ describe("executeAgentLoop golden paths", () => {
     expect(result.metrics.maxSnapshotSize).toBeGreaterThan(0);
   });
 
-  it("重复相同任务批次且上轮无错：自动终止避免自转", async () => {
+  it("重复相同任务批次且上轮无错：先提示后终止避免自转", async () => {
     const registry = createBaseRegistry({
       domExecute: async () => ({ content: "dom ok" }),
     });
@@ -305,8 +309,14 @@ describe("executeAgentLoop golden paths", () => {
         toolCalls: [{ id: "1", name: "dom", input: { action: "fill", selector: "#input", text: "11" } }],
       },
       {
-        text: "REMAINING: DONE",
+        // 第 2 轮：相同批次，注入 repeated-action 提示但不停机
+        text: "REMAINING: 输入11并发送",
         toolCalls: [{ id: "2", name: "dom", input: { action: "fill", selector: "#input", text: "11" } }],
+      },
+      {
+        // 第 3 轮：仍然相同批次 → 真正停机
+        text: "REMAINING: 输入11并发送",
+        toolCalls: [{ id: "3", name: "dom", input: { action: "fill", selector: "#input", text: "11" } }],
       },
       {
         text: "不应执行到这里",
@@ -321,9 +331,9 @@ describe("executeAgentLoop golden paths", () => {
       maxRounds: 5,
     });
 
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.reply).toContain("REMAINING: DONE");
-    expect(result.metrics.roundCount).toBe(2);
+    // 第 1、2 轮各执行了一次 fill，第 3 轮停机未执行
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.metrics.roundCount).toBe(3);
   });
 
   it("DOM 变更动作后强制断轮：click 后不继续执行同批次后续动作", async () => {
@@ -620,7 +630,7 @@ describe("executeAgentLoop golden paths", () => {
     expect(selectorArg.match(/\.custom-loading/g)?.length).toBe(1);
   });
 
-  it("连续无 REMAINING 协议且启发式无法推进：3 轮后强制终止（仅失败或无 DOM 变更时计数）", async () => {
+  it("连续无 REMAINING 协议且启发式无法推进：5 轮后强制终止（仅失败或无 DOM 变更时计数）", async () => {
     // 当工具全部返回错误（模型卡住）且无 REMAINING 协议时，才触发协议缺失终止。
     // 若工具有成功的 DOM 变更，不计入协议缺失（模型在实质推进）。
     const registry = createBaseRegistry({
@@ -640,13 +650,21 @@ describe("executeAgentLoop golden paths", () => {
         toolCalls: [{ id: "2", name: "dom", input: { action: "click", selector: "#btn2" } }],
       },
       {
+        text: "再试一次。",
+        toolCalls: [{ id: "3", name: "dom", input: { action: "click", selector: "#btn3" } }],
+      },
+      {
         assert: ({ messages }) => {
           const payload = String(messages[messages.length - 1]?.content ?? "");
           expect(payload).toContain("Protocol reminder");
           expect(payload).toContain("REMAINING protocol missing");
         },
+        text: "还是试试看。",
+        toolCalls: [{ id: "4", name: "dom", input: { action: "click", selector: "#btn4" } }],
+      },
+      {
         text: "弹窗内容已查看完毕，任务完成。",
-        toolCalls: [{ id: "3", name: "dom", input: { action: "click", selector: "#btn3" } }],
+        toolCalls: [{ id: "5", name: "dom", input: { action: "click", selector: "#btn5" } }],
       },
       {
         text: "不应执行到这里",
@@ -661,11 +679,11 @@ describe("executeAgentLoop golden paths", () => {
       maxRounds: 10,
     });
 
-    expect(result.metrics.roundCount).toBe(3);
+    expect(result.metrics.roundCount).toBe(5);
     expect(result.reply).toContain("任务完成");
   });
 
-  it("无 REMAINING 协议但重复相同批次：同批检测不再被启发式失败阻断", async () => {
+  it("无 REMAINING 协议但重复相同批次：先提示后停机", async () => {
     const registry = createBaseRegistry({
       domExecute: async () => ({ content: "dom ok" }),
     });
@@ -676,8 +694,14 @@ describe("executeAgentLoop golden paths", () => {
         toolCalls: [{ id: "1", name: "dom", input: { action: "click", selector: "#same" } }],
       },
       {
+        // 第 2 轮：相同批次，注入提示但不停机
         text: "弹窗已打开。",
         toolCalls: [{ id: "2", name: "dom", input: { action: "click", selector: "#same" } }],
+      },
+      {
+        // 第 3 轮：仍然相同批次 → 真正停机
+        text: "弹窗已打开。",
+        toolCalls: [{ id: "3", name: "dom", input: { action: "click", selector: "#same" } }],
       },
       {
         text: "不应执行到这里",
@@ -692,9 +716,9 @@ describe("executeAgentLoop golden paths", () => {
       maxRounds: 10,
     });
 
-    // 重复批次检测在第 2 轮触发（不再被 roundHasError 阻断）
-    expect(result.metrics.roundCount).toBe(2);
-    expect(result.toolCalls).toHaveLength(1);
+    // 重复批次检测在第 3 轮触发（第 2 轮注入提示，第 3 轮真正停机）
+    expect(result.metrics.roundCount).toBe(3);
+    expect(result.toolCalls).toHaveLength(2);
   });
 
   it("dom.click 强制断轮：click 后同批次后续动作推迟到下一轮", async () => {

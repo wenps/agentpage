@@ -57,6 +57,7 @@ import {
   reduceRemainingHeuristically,
   shouldForceRoundBreak,
   isPotentialDomMutation,
+  isConfirmedProgressAction,
   sleep,
   toContentString,
   hasToolError,
@@ -366,8 +367,13 @@ export async function executeAgentLoop(
         pendingNotFoundRetry = undefined;
       }
 
-      if (parsedInstructionState.hasRemainingProtocol) {
-        remainingInstruction = parsedInstructionState.nextInstruction;
+      // 模型无工具调用时，仅接受 DONE（收敛），不接受非空 REMAINING。
+      // 避免模型将用户任务改写为自身问题（如 MiniMax 首轮返回"你好，请告诉我需要操作"）导致 remaining 被污染。
+      if (
+        parsedInstructionState.hasRemainingProtocol &&
+        parsedInstructionState.nextInstruction.trim().length === 0
+      ) {
+        remainingInstruction = "";
       }
 
       const unresolvedRemaining = remainingInstruction.trim().length > 0;
@@ -406,11 +412,23 @@ export async function executeAgentLoop(
       lastPlannedBatchKey = plannedBatchKey;
     }
 
-    // 防自转：连续两轮给出相同计划且上一轮无错误，判定任务已完成或模型卡住，直接结束。
-    if (consecutiveSamePlannedBatch >= 2 && !lastRoundHadError) {
+    // 防自转：连续相同计划批次检测。
+    // ≥ 2 轮：注入提示，要求模型换策略或结束。
+    // ≥ 3 轮：仍无变化，直接终止。
+    if (consecutiveSamePlannedBatch >= 3 && !lastRoundHadError) {
       finalReply = response.text?.trim() || "任务已完成。";
       if (finalReply) callbacks?.onText?.(finalReply);
       break;
+    }
+    if (consecutiveSamePlannedBatch >= 2 && !lastRoundHadError) {
+      protocolViolationHint = [
+        "Repeated action warning:",
+        "- You performed the EXACT same tool call(s) as the previous round, but no visible change occurred.",
+        "This round you MUST do ONE of:",
+        "1) Try a DIFFERENT element or approach (e.g., look for an alternative button, link, or parent container);",
+        "2) If the task is truly complete, return REMAINING: DONE with no tool calls.",
+        "Do NOT repeat the same action again.",
+      ].join("\n");
     }
 
     // ─── Dry-run 模式 ───
@@ -437,6 +455,7 @@ export async function executeAgentLoop(
     // roundHasError 用于控制“重复批次停机”：上一轮有错误时，不应武断终止。
     let roundHasError = false;
     let roundHasPotentialDomMutation = false;
+    let roundHasConfirmedProgress = false;
     const executedTaskCalls: Array<{ name: string; input: unknown }> = [];
     const roundMissingTasks: MissingToolTask[] = [];
     for (const tc of response.toolCalls) {
@@ -499,6 +518,9 @@ export async function executeAgentLoop(
       if (!hasToolError(result) && isPotentialDomMutation(tc.name, tc.input)) {
         roundHasPotentialDomMutation = true;
       }
+      if (!hasToolError(result) && isConfirmedProgressAction(tc.name, tc.input)) {
+        roundHasConfirmedProgress = true;
+      }
 
       // 捕获显式 snapshot 结果
       if (tc.name === "page_info" && getToolAction(tc.input) === "snapshot") {
@@ -538,11 +560,13 @@ export async function executeAgentLoop(
         consecutiveNoProtocolRounds = 0;
       } else if (executedTaskCalls.length > 0) {
         // 模型执行了工具但未遵循 REMAINING 协议且启发式无法推进。
-        // 若本轮有成功的 DOM 变更（click/fill 等），说明任务在实质推进，
-        // 不累计协议缺失计数，避免因模型不遵循 REMAINING 协议而过早停机。
-        // 仅在本轮全部失败或无 DOM 变更时才累计，防止真正的空转。
-        if (!roundHasPotentialDomMutation || roundHasError) {
+        // 有"确定性推进"（form input / press / navigate / 自定义工具）时重置计数器。
+        // click 不算——因为 click 可能点了但无效果（如点击无 listener 的元素），
+        // 避免模型反复点击无效目标时计数器永远被重置而导致无限循环。
+        if (!roundHasConfirmedProgress || roundHasError) {
           consecutiveNoProtocolRounds += 1;
+        } else {
+          consecutiveNoProtocolRounds = 0;
         }
       }
     }
@@ -552,6 +576,11 @@ export async function executeAgentLoop(
       : `REMAINING: ${remainingInstruction || "DONE"}`;
 
     lastRoundHadError = roundHasError;
+    // 全部工具调用被框架拦截（无实际执行）时，视为非正常轮次：
+    // 对重复批次检测视同"有错误"，避免因 page_info 被拦截而误判自转停机。
+    if (executedTaskCalls.length === 0 && response.toolCalls.length > 0) {
+      lastRoundHadError = true;
+    }
     previousRoundTasks = buildTaskArray(executedTaskCalls);
     previousRoundPlannedTasks = plannedTasksCurrentRound;
 
@@ -567,22 +596,22 @@ export async function executeAgentLoop(
     }
 
     // 保护 5：防协议缺失空转 — 连续多轮有工具调用但无 REMAINING 协议且启发式无法推进
-    if (consecutiveNoProtocolRounds >= 3) {
+    // 阈值放宽至 5 轮：MiniMax 等模型系统性不输出 REMAINING，3 轮过于激进。
+    if (consecutiveNoProtocolRounds >= 5) {
       finalReply = response.text?.trim() || "任务已完成。";
       if (finalReply) callbacks?.onText?.(finalReply);
       break;
     }
-    if (consecutiveNoProtocolRounds >= 2) {
+    if (consecutiveNoProtocolRounds >= 3) {
       protocolViolationHint = [
-        "Protocol reminder: REMAINING protocol missing for 2+ rounds with tool calls.",
+        "Protocol reminder: REMAINING protocol missing for 3+ rounds with tool calls.",
         "You MUST include REMAINING: <text> or REMAINING: DONE in every response.",
         "If the task is fully complete, return REMAINING: DONE with no tool calls.",
       ].join("\n");
     }
 
-    // 保护 6：空转检测
-    const attemptedTaskCalls = response.toolCalls.map(tc => ({ name: tc.name, input: tc.input }));
-    const idleResult = detectIdleLoop(attemptedTaskCalls, consecutiveReadOnlyRounds);
+    // 保护 6：空转检测（基于实际执行的工具，排除被框架拦截的冗余调用）
+    const idleResult = detectIdleLoop(executedTaskCalls, consecutiveReadOnlyRounds);
     if (idleResult === -1) {
       finalReply = response.text?.trim() || "任务已完成。";
       if (finalReply) callbacks?.onText?.(finalReply);

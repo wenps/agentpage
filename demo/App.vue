@@ -124,8 +124,7 @@ import { demoMenuGroups, getDemoRouteMeta } from './router'
 const agent = new WebAgent({
   token: (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.MINIMAX_TOKEN ?? '',
   provider: 'minimax',
-  model: 'MiniMax-M2.5',
-  baseURL: '/api',
+  model: 'MiniMax-M2.5-highspeed',
   stream: false,
   panel: {
     enableMask: true,

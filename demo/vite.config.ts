@@ -10,14 +10,6 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
-    proxy: {
-      "/api": {
-        target: "https://api.minimaxi.com",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, "/v1"),
-        secure: true,
-      },
-    },
   },
 
   esbuild: {

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.0.46
+
+### 修复
+
+- **重复批次防自转过于激进导致提前停机**：
+  - 原逻辑：连续 2 轮相同工具调用批次 + 上轮无错误 → 直接停机
+  - 修复后：连续 2 轮 → 注入"换策略"提示给模型一次机会；连续 3 轮 → 真正停机
+  - 典型场景：模型点击"创建议题"按钮后页面跳转中，快照暂未更新，模型重试同一点击 → 旧逻辑直接终止任务
+
+- **协议缺失计数器过早停机**：
+  - 修复 `consecutiveNoProtocolRounds` 在有确定性推进时仅"不递增"但不重置的问题，改为 **重置为 0**
+  - 原逻辑导致 fill 等动作只是暂停计数，后续 click/press 轮次继续累加，6 轮即触发停机
+  - 修复后：confirmed progress 轮次重置计数器，给模型更多行动空间
+
+- **`isConfirmedProgressAction` 覆盖范围扩展**：
+  - 新增 `dom.press`（按键操作）：Enter 提交、Tab 切焦等均属用户显式操作，应算确定性推进
+  - 新增自定义工具识别：非 SDK 内置工具（dom/navigate/page_info/wait/evaluate 以外）由开发者注册、模型有意调用，视为确定性推进
+  - click 仍然排除——因为 click 可能点中无 listener 元素导致无效
+
+- **修复 click 死循环**：
+  - 新增 `isConfirmedProgressAction()` 辅助函数，仅包含必定产生可见状态变化的动作
+  - 协议缺失豁免改用 `roundHasConfirmedProgress`（不含 click），避免模型反复点击无效目标时计数器被 `isPotentialDomMutation`（含 click）持续豁免导致无限循环
+
+- **System Prompt 点击规则增强**：
+  - 明确点击目标必须具备点击信号（`listeners` 含 `clk/pdn/mdn`、`onclick`、原生 `<a>/<button>`、`role=button/link`）
+  - 禁止点击仅有 `blr/fcs` 信号的元素
+  - 若目标文本无点击信号，引导 AI 查找父容器或最近可操作兄弟元素
+
 ## 0.0.42
 
 ### 修复
