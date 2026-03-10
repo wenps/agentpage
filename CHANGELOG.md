@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.0.48
+
+### 新增
+
+- **快照指纹变化检测（框架级）**：
+  - 新增 `computeSnapshotFingerprint()` 辅助函数：将快照中 `#hashID` 替换为占位符 `#_` 后计算 djb2 哈希，避免 DOM 重新渲染导致 hashID 变化但内容未变的误判
+  - Agent Loop 每轮行动前后各计算一次快照指纹，当本轮存在潜在 DOM 变更动作（`roundHasPotentialDomMutation`）且行动后指纹不变时，注入 `Snapshot unchanged after action` 提示
+  - 与 Prompt 层效果验证互补：效果验证依赖模型自我察觉，指纹检测是框架级兜底，确保模型感知到操作无效并换目标
+
+### 文档
+
+- 同步更新 `AGENTS.md`：新增 §4.7 快照指纹变化检测说明，更新 helpers.ts 模块职责
+- 同步更新 `README.md`：保护机制表格新增快照指纹检测行，核心优势补充指纹检测
+
+## 0.0.47
+
+### 修复
+
+- **点击无效后模型不换目标**：
+  - 增强 System Prompt `No-effect fallback` 规则：从抽象的"try nearest sibling"改为具体三步回退——(1) 找容器内 `<a>`/`<button>` 子元素 (2) 尝试父/兄弟节点 (3) 用 `navigate.goto` 直接跳转
+  - 增强 `Effect check` 规则：明确"快照没变 = click 失败"，必须换元素（如行内链接或按钮）
+  - 增强 `Repeated action warning`（防自转提示）：注入具体行动方案——找容器内 `<a>`/`<button>`、用 href 直接导航、换全新策略
+  - 增强 Round 1+ 上轮执行回顾提示：无效果时引导找子元素而非重复
+
 ## 0.0.46
 
 ### 修复

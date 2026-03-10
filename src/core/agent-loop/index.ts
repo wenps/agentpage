@@ -58,6 +58,7 @@ import {
   shouldForceRoundBreak,
   isPotentialDomMutation,
   isConfirmedProgressAction,
+  computeSnapshotFingerprint,
   sleep,
   toContentString,
   hasToolError,
@@ -288,6 +289,9 @@ export async function executeAgentLoop(
       await refreshSnapshot();
     }
 
+    // 记录本轮行动前的快照指纹，用于轮结束时检测操作是否产生页面变化
+    const roundStartFingerprint = computeSnapshotFingerprint(pageContext.latestSnapshot || "");
+
     // ═══ 阶段 2：构建紧凑消息 ═══
     // 每轮消息都自带快照（buildCompactMessages 注入），因此始终剥离
     // system prompt 中的旧快照，避免重复。
@@ -423,10 +427,12 @@ export async function executeAgentLoop(
     if (consecutiveSamePlannedBatch >= 2 && !lastRoundHadError) {
       protocolViolationHint = [
         "Repeated action warning:",
-        "- You performed the EXACT same tool call(s) as the previous round, but no visible change occurred.",
-        "This round you MUST do ONE of:",
-        "1) Try a DIFFERENT element or approach (e.g., look for an alternative button, link, or parent container);",
-        "2) If the task is truly complete, return REMAINING: DONE with no tool calls.",
+        "- You performed the EXACT same tool call(s) as the previous round, but NO visible change occurred in the snapshot.",
+        "The clicked element did not trigger navigation or DOM change. This round you MUST do ONE of:",
+        "1) Look INSIDE the clicked container for an <a> link, <button>, or child element with clk/pdn/mdn listener, and click THAT instead;",
+        "2) If there is a visible href/URL, use navigate.goto to go there directly;",
+        "3) Try a completely different approach (e.g., search, filter, or navigate via sidebar);",
+        "4) If the task is truly complete, return REMAINING: DONE with no tool calls.",
         "Do NOT repeat the same action again.",
       ].join("\n");
     }
@@ -625,6 +631,23 @@ export async function executeAgentLoop(
 
     // ═══ 阶段 5：刷新快照（供下一轮使用）═══
     await refreshSnapshot();
+
+    // ═══ 快照变化检测：对比本轮行动前后快照指纹 ═══
+    // 仅在本轮有潜在 DOM 变更动作时比对，避免对只读轮次误报。
+    if (roundHasPotentialDomMutation) {
+      const roundEndFingerprint = computeSnapshotFingerprint(pageContext.latestSnapshot || "");
+      if (roundEndFingerprint === roundStartFingerprint && roundStartFingerprint !== "") {
+        const unchangedHint = [
+          "Snapshot unchanged after action:",
+          "- The page snapshot is IDENTICAL before and after your action(s) this round.",
+          "- Your click/action had NO visible effect on the page. Do NOT repeat it.",
+          "- Look INSIDE the target for <a>/<button>/child with clk listener, or use navigate.goto if href is visible.",
+        ].join("\n");
+        protocolViolationHint = protocolViolationHint
+          ? protocolViolationHint + "\n\n" + unchangedHint
+          : unchangedHint;
+      }
+    }
   }
 
   // 构建紧凑的 result.messages 供多轮记忆使用

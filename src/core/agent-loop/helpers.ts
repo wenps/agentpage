@@ -16,6 +16,7 @@
  * - 快照相关：
  *   - `parseSnapshotExpandHints`：解析 `SNAPSHOT_HINT: EXPAND_CHILDREN`
  *   - `extractHashSelectorRef`：从 `#ref` 选择器提取 ref id
+ *   - `computeSnapshotFingerprint`：剥离 hashID 后计算快照指纹，用于轮次间变化检测
  * - 任务推进与协议：
  *   - `buildTaskArray`：将工具调用规整成稳定任务数组
  *   - `normalizeModelOutput`：压缩模型输出供下一轮上下文使用
@@ -87,7 +88,34 @@ export function extractHashSelectorRef(toolInput: unknown): string | null {
   const m = selector.trim().match(/^#([A-Za-z0-9_-]+)$/);
   return m ? m[1] : null;
 }
+/**
+ * 快照指纹计算 — 用于轮次间快照变化检测。
+ *
+ * 元素的 #hashID（如 `#1kry9hw`）可能因 DOM 重新渲染而变化，
+ * 但页面实际内容并未改变。因此先将 hashID 替换为占位符 `#_`，
+ * 再计算 djb2 哈希，确保指纹只反映真实页面结构和文本差异。
+ *
+ * 用途：轮次行动前后各算一次指纹，若一致说明操作未产生任何可见效果。
+ */
+export function computeSnapshotFingerprint(snapshot: string): string {
+  if (!snapshot) return "";
+  // 剥离 hash ID（如 #1kry9hw、#az8y2x），保留结构和文本内容
+  const normalized = snapshot.replace(/#[a-z0-9]{4,}/gi, "#_");
+  return _djb2(normalized);
+}
 
+/**
+ * djb2 字符串哈希（非加密）。
+ *
+ * 纯粹用于快照指纹比对，不用于安全场景。
+ */
+function _djb2(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
 /**
  * 构建任务数组。
  *

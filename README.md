@@ -9,7 +9,10 @@
 > 核心主张：通过 **Prompt + Tools + 路由**，快速为网站实现 AI 赋能，并构建**前端运行时 AI Skill**。AutoPilot 本质上是一个运行在前端浏览器中的 AI Agent。
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/language-TypeScript-3178C6" alt="TypeScript" /></a>
 <a href="https://www.npmjs.com/package/agentpage"><img src="https://img.shields.io/npm/v/agentpage" alt="npm" /></a>
+<a href="https://www.npmjs.com/package/agentpage"><img src="https://img.shields.io/npm/dm/agentpage" alt="downloads" /></a>
+<a href="https://bundlephobia.com/package/agentpage"><img src="https://img.shields.io/bundlephobia/minzip/agentpage" alt="minzipped size" /></a>
 
 AutoPilot 的目标不是生成文本，而是在浏览器中完成真实任务：点击、填写、导航、等待、执行脚本，并在每一轮根据最新页面状态持续推进。
 
@@ -76,7 +79,7 @@ npm install agentpage
 
 - **Prompt + Tools + 路由三层解耦**：可以快速把"可执行 AI 能力"植入现有前端系统，按路由渐进式接入，支持"项目级工具 + 路由级工具"组合。
 - **增量任务消费协议（REMAINING）**：任务不是一次性执行，而是逐轮消费收敛。每轮只做当前快照可执行的动作，通过 `REMAINING` 协议跟踪进度，支持协议修复和启发式回退，确保复杂多步任务稳定收敛。
-- **8 层保护机制**：冗余拦截、快照防抖、元素恢复、Not-found 重试对话流、导航刷新、空转检测、重复批次防自转、协议修复 —— 目标是**稳定收敛**，而不是偶然成功。
+- **9 层保护机制**：冗余拦截、快照防抖、元素恢复、Not-found 重试对话流、导航刷新、空转检测、重复批次防自转、协议修复、快照指纹变化检测 —— 目标是**稳定收敛**，而不是偶然成功。
 - **Playwright 级别交互语义**：完整 pointer/mouse 事件链、4 种 scrollIntoView 策略轮换、actionability 五重检查（可见/稳定/可用/可编辑/遮挡）、智能重定向 retarget、隐藏控件代理点击（ElementPlus/AntD）、`select_option` value/label/index 三策略。
 - **运行时事件信号追踪**：通过 `EventTarget.prototype` 补丁全局追踪事件绑定，快照中输出 `listeners="clk,inp,chg"` 信号，帮助 AI 精准识别真实可交互元素，而非猜测。
 - **效果验证机制（Effect Check）**：每轮行动前自动检查上轮操作是否在当前快照中生效，未生效则尝试邻近元素，避免重复点击无效目标。
@@ -229,6 +232,7 @@ Round 3: 执行 C → REMAINING: DONE
 | 重复批次防自转 | 连续两轮相同任务批次 | 直接终止 |
 | 协议修复回合 | remaining 未完成却无工具调用 | 注入强约束提示 |
 | 轮次稳定等待 | 本轮有 DOM 变化动作 | loading hidden + DOM quiet（200ms/4s） |
+| 快照指纹变化检测 | 本轮有 DOM 变更动作且行动后指纹不变 | 注入 `Snapshot unchanged` 提示，强制模型换目标 |
 
 ### 5. 停机条件
 

@@ -172,6 +172,15 @@ src/
   - Round 1+ 用户消息中补强同一规则
   - previousRoundTasks 列表后附加简短效果提示（非阻塞式，避免分析瘧痪）
 
+### 4.7 快照指纹变化检测（框架级）
+
+通过 `computeSnapshotFingerprint` 在每轮行动前后各算一次快照指纹，从框架层判定操作是否产生了真实页面变化：
+- 指纹计算前先将快照中的 `#hashID`（如 `#1kry9hw`）替换为占位符 `#_`，避免 DOM 重新渲染导致 hashID 变化但内容未变的误判
+- 仅在本轮有潜在 DOM 变更动作（`roundHasPotentialDomMutation`）时才对比
+- 若行动后指纹不变：注入 `Snapshot unchanged after action` 提示，告知模型该操作无效果，必须换目标
+- 该提示与 `protocolViolationHint`（重复批次/协议缺失）合并注入，不覆盖
+- 与效果验证机制互补：效果验证依赖模型自我察觉，指纹检测是框架级兜底
+
 ## 5. 模块职责细化
 
 ### core/agent-loop
@@ -202,6 +211,7 @@ src/
   - 工具结果识别、输入摘要、等待时间解析等纯函数
   - `isPotentialDomMutation()`：宽泛判定（含 click），用于轮次后稳定等待
   - `isConfirmedProgressAction()`：窄判定（含 fill/type/press/navigate/自定义工具，不含 click），用于协议缺失计数器重置与豁免
+  - `computeSnapshotFingerprint()`：剥离 hashID 后的快照指纹，用于轮次间变化检测
 
 ### core/ai-client
 

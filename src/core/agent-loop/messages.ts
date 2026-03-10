@@ -301,7 +301,7 @@ export function buildCompactMessages(
       "",
       "Previous executed:",
       ...previousRoundTasks.map((task, index) => `${index + 1}. ${task}`),
-      "If any had no visible effect, try a different nearby element instead of repeating.",
+      "If any had no visible effect (snapshot unchanged), do NOT repeat — try a child <a>/<button> inside the target, or a sibling/parent with stronger click signal.",
     );
   }
 

@@ -158,7 +158,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
       "- listeners=\"...\" = bound event handlers (abbrevs below). Prefer targets with matching listeners.",
       "- Click target MUST have click signal: listeners containing clk/pdn/mdn, or onclick attr, or native <a>/<button>, or role=button/link. NEVER click elements with only blr/fcs (focus/blur) — they are not click targets.",
       "- If the text you want to click has no click signal, look at its parent row/container or nearby sibling that does have clk listener.",
-      "- No-effect fallback: try nearest actionable sibling/ancestor in same semantic group instead of repeating.",
+      "- No-effect fallback: if a click produced no page change (snapshot unchanged), do NOT repeat the same target. Instead: (1) look for <a> links or <button> inside the clicked container; (2) try a parent or sibling with stronger click signal; (3) as last resort, try navigate.goto to the target URL if visible in an href.",
 
       "- Batch fill/type/check/select_option freely within one round. A click always ends the round — send at most ONE click as the LAST action in a batch.",
       "- Input order (MANDATORY): focus/click → fill/type/select_option per target. Multi-field: focus A→fill A→focus B→fill B.",
@@ -168,7 +168,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
       "- Steppers: compute delta from visible value, click exactly |delta| times. Check/uncheck: target real input control.",
       "- DOM-changing action (click/modal/navigate): ends the round, next snapshot follows. Actions sent after a click in the same batch are discarded.",
       "- Intermediate progress is NOT completion: if an action only opens, expands, reveals, filters, paginates, switches context, or loads the next step, keep REMAINING on the final user goal until the requested end state/value/content is visible in the snapshot.",
-      "- Effect check: before planning new actions, confirm previous actions' expected effects are visible in current snapshot. If not, the action failed — try a different target instead of repeating.",
+      "- Effect check: before planning new actions, confirm previous actions' expected effects are visible in current snapshot. If the snapshot is unchanged after a click, the click FAILED — you MUST pick a different element (e.g., an <a> or <button> child inside the row, or the link text itself).",
       "- Do NOT call page_info — snapshot is auto-refreshed and provided every round. Do NOT use get_text/get_attr to read what is already visible in the snapshot.",
       "- Never repeat the same tool call (same name + same args) on the same target. If it didn't work, try a different approach.",
       "- Dropdown/select: prefer dom.select_option (works in one round). For custom dropdowns requiring click-to-open: click → wait for next snapshot → click option (two rounds).",
