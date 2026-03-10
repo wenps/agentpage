@@ -67,6 +67,45 @@
 	- [ ] 每条 detail 含 `{ step, action, passed, actual, expected, screenshotUrl? }`
 - [ ] 验收：用户配置一段"填表单 - 提交 - 断言成功提示"任务，结果自动输出 pass/fail + 截图
 
+### 1A. 测试模式（模块化用例 + 验证函数）
+
+> **为什么重要**：让 AI Agent 从"执行单次指令"升级为"批量执行测试套件并逐个验证"，支持结构化测试数据 + 自定义解析验证。
+
+- [ ] **TestCase 数据结构** — 单条测试用例
+	- [ ] `name`：用例名称
+	- [ ] `instruction`：AI 执行指令（传给 `agent.chat()`）
+	- [ ] `validate(result, doc)`：验证函数，AI 执行后调用，返回 `{ passed, message?, details? }`
+	- [ ] `setup?()` / `teardown?()`：前置/清理钩子（导航、重置表单、注入数据等）
+	- [ ] `timeoutMs?`：单条超时
+	- [ ] `tags?`：标签（用于筛选和分组统计）
+- [ ] **TestSuite 数据结构** — 测试套件
+	- [ ] `name` / `description`：套件名称与描述
+	- [ ] `cases: TestCase[]`：按顺序逐个执行的用例列表
+	- [ ] `beforeAll / afterAll`：全局钩子（登录/登出等）
+	- [ ] `beforeEach / afterEach`：每条用例前后钩子
+- [ ] **TestRunner 执行器** — 依赖 WebAgent 驱动 AI 批量执行
+	- [ ] 逐个执行用例：setup → chat(instruction) → validate → teardown
+	- [ ] 支持标签筛选（`filterTags`）、失败终止（`continueOnFailure`）
+	- [ ] 单条超时保护（默认 120s）
+	- [ ] 用例间冷却时间（默认 1s），让页面状态稳定
+	- [ ] 进度回调：`onCaseComplete(result, index, total)`
+- [ ] **内置验证辅助函数** — 常用断言快捷方式
+	- [ ] `validateText(selector, expected)` — 元素文本匹配
+	- [ ] `validateValue(selector, expected)` — 输入框值匹配
+	- [ ] `validateVisible(selector)` / `validateHidden(selector)` — 可见性
+	- [ ] `validateUrl(pattern)` — URL 匹配
+	- [ ] `validateChecked(selector, expected?)` — 选中状态
+	- [ ] `validateCount(selector, count)` — 元素数量
+	- [ ] `validateMetrics(check)` — AgentLoop 指标断言
+	- [ ] `validateAll(...validators)` — 组合验证（全部通过才算通过）
+- [ ] **TestSuiteResult 结果汇总**
+	- [ ] `summary: { total, passed, failed, errors, skipped, duration, passRate }`
+	- [ ] `results: TestCaseResult[]` — 每条含 status/message/details/duration/metrics
+- [ ] **WebAgent 集成**
+	- [ ] `agent.runTests(suite, options?)` — 执行测试套件
+	- [ ] `agent.runTest(case, options?)` — 执行单条用例
+- [ ] 验收：用户定义 5 条表单操作用例，AI 逐个执行+验证，输出 pass/fail 汇总报告
+
 ### 2. 页面截图能力（从 P2 提升）
 
 > **为什么提升**：截图是验证框架的基础设施，也是 B 端测试交付物的核心需求。

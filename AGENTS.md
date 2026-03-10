@@ -37,13 +37,15 @@ src/
 │       ├── index.ts
 │       ├── constants.ts
 │       ├── custom.ts
-│       ├── openai.ts
-│       ├── anthropic.ts
-│       ├── deepseek.ts
-│       ├── doubao.ts
-│       ├── qwen.ts
-│       ├── minimax.ts
-│       └── sse.ts
+│       ├── sse.ts
+│       └── models/
+│           ├── index.ts
+│           ├── openai.ts
+│           ├── anthropic.ts
+│           ├── deepseek.ts
+│           ├── doubao.ts
+│           ├── qwen.ts
+│           └── minimax.ts
 └── web/
   ├── index.ts
   ├── dom-tool.ts          # 兼容转发层（re-export）
@@ -215,16 +217,18 @@ src/
 
 ### core/ai-client
 
-- `index.ts`：provider 路由
-- `openai.ts`：OpenAI/Copilot 协议
-- `anthropic.ts`：Anthropic 协议
-- `deepseek.ts`：DeepSeek 协议
-- `doubao.ts`：豆包（Ark）OpenAI 兼容协议
-- `qwen.ts`：通义千问（DashScope）OpenAI 兼容协议
-- `minimax.ts`：MiniMax OpenAI 兼容协议
-- `sse.ts`：SSE 统一消费器
-- `custom.ts`：BaseAIClient 抽象封装
+- `index.ts`：provider 路由与统一类型导出
 - `constants.ts`：provider 默认端点与共享校验逻辑
+- `custom.ts`：BaseAIClient 抽象封装
+- `sse.ts`：SSE 统一消费器
+- `models/`：各 provider 客户端类
+  - `index.ts`：模型客户端统一导出
+  - `openai.ts`：OpenAI/Copilot 协议
+  - `anthropic.ts`：Anthropic 协议
+  - `deepseek.ts`：DeepSeek 协议（复用 OpenAIClient）
+  - `doubao.ts`：豆包（Ark）OpenAI 兼容协议（复用 OpenAIClient）
+  - `qwen.ts`：通义千问（DashScope）OpenAI 兼容协议（复用 OpenAIClient）
+  - `minimax.ts`：MiniMax OpenAI 兼容协议（复用 OpenAIClient）
 
 ### web
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "@sinclair/typebox";
-import { buildOpenAIRequest, OpenAIClient } from "./openai.js";
+import { buildOpenAIRequest, OpenAIClient } from "./models/openai.js";
 
 afterEach(() => {
   vi.restoreAllMocks();

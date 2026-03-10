@@ -430,7 +430,7 @@ export async function executeAgentLoop(
         "- You performed the EXACT same tool call(s) as the previous round, but NO visible change occurred in the snapshot.",
         "The clicked element did not trigger navigation or DOM change. This round you MUST do ONE of:",
         "1) Look INSIDE the clicked container for an <a> link, <button>, or child element with clk/pdn/mdn listener, and click THAT instead;",
-        "2) If there is a visible href/URL, use navigate.goto to go there directly;",
+        "2) Try a parent or sibling element with stronger click signal (clk/pdn/mdn listener);",
         "3) Try a completely different approach (e.g., search, filter, or navigate via sidebar);",
         "4) If the task is truly complete, return REMAINING: DONE with no tool calls.",
         "Do NOT repeat the same action again.",
@@ -601,21 +601,6 @@ export async function executeAgentLoop(
       break;
     }
 
-    // 保护 5：防协议缺失空转 — 连续多轮有工具调用但无 REMAINING 协议且启发式无法推进
-    // 阈值放宽至 5 轮：MiniMax 等模型系统性不输出 REMAINING，3 轮过于激进。
-    if (consecutiveNoProtocolRounds >= 5) {
-      finalReply = response.text?.trim() || "任务已完成。";
-      if (finalReply) callbacks?.onText?.(finalReply);
-      break;
-    }
-    if (consecutiveNoProtocolRounds >= 3) {
-      protocolViolationHint = [
-        "Protocol reminder: REMAINING protocol missing for 3+ rounds with tool calls.",
-        "You MUST include REMAINING: <text> or REMAINING: DONE in every response.",
-        "If the task is fully complete, return REMAINING: DONE with no tool calls.",
-      ].join("\n");
-    }
-
     // 保护 6：空转检测（基于实际执行的工具，排除被框架拦截的冗余调用）
     const idleResult = detectIdleLoop(executedTaskCalls, consecutiveReadOnlyRounds);
     if (idleResult === -1) {
@@ -634,6 +619,8 @@ export async function executeAgentLoop(
 
     // ═══ 快照变化检测：对比本轮行动前后快照指纹 ═══
     // 仅在本轮有潜在 DOM 变更动作时比对，避免对只读轮次误报。
+    // 同时：若页面确实发生变化（指纹不同），重置 consecutiveNoProtocolRounds，
+    // 因为 click 导致的导航/页面切换属于真实推进，不应因模型未输出 REMAINING 协议而被罚停。
     if (roundHasPotentialDomMutation) {
       const roundEndFingerprint = computeSnapshotFingerprint(pageContext.latestSnapshot || "");
       if (roundEndFingerprint === roundStartFingerprint && roundStartFingerprint !== "") {
@@ -641,12 +628,36 @@ export async function executeAgentLoop(
           "Snapshot unchanged after action:",
           "- The page snapshot is IDENTICAL before and after your action(s) this round.",
           "- Your click/action had NO visible effect on the page. Do NOT repeat it.",
-          "- Look INSIDE the target for <a>/<button>/child with clk listener, or use navigate.goto if href is visible.",
+          "- Look INSIDE the target for <a>/<button>/child with clk listener, or try a parent/sibling with stronger signal, or use a completely different approach.",
         ].join("\n");
         protocolViolationHint = protocolViolationHint
           ? protocolViolationHint + "\n\n" + unchangedHint
           : unchangedHint;
+      } else if (roundEndFingerprint !== roundStartFingerprint) {
+        // 页面确实发生了变化：即使模型未遵循 REMAINING 协议，click 导航也属于真实推进。
+        // 重置计数器，避免多步 UI 导航（如搜索→点击仓库→选择分支→切换 Tab）
+        // 因连续 click 轮次被误判为协议缺失空转。
+        consecutiveNoProtocolRounds = 0;
       }
+    }
+
+    // 保护 5：防协议缺失空转 — 连续多轮有工具调用但无 REMAINING 协议且启发式无法推进
+    // 移至快照指纹对比之后：若本轮 click 导致页面变化，已在上方重置计数器，不会误停。
+    // 仅当连续多轮操作均无页面变化且无协议时，才触发停机。
+    if (consecutiveNoProtocolRounds >= 5) {
+      finalReply = response.text?.trim() || "任务已完成。";
+      if (finalReply) callbacks?.onText?.(finalReply);
+      break;
+    }
+    if (consecutiveNoProtocolRounds >= 3) {
+      const noProtocolHint = [
+        "Protocol reminder: REMAINING protocol missing for 3+ rounds with tool calls.",
+        "You MUST include REMAINING: <text> or REMAINING: DONE in every response.",
+        "If the task is fully complete, return REMAINING: DONE with no tool calls.",
+      ].join("\n");
+      protocolViolationHint = protocolViolationHint
+        ? protocolViolationHint + "\n\n" + noProtocolHint
+        : noProtocolHint;
     }
   }
 

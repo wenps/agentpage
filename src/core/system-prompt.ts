@@ -158,7 +158,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
       "- listeners=\"...\" = bound event handlers (abbrevs below). Prefer targets with matching listeners.",
       "- Click target MUST have click signal: listeners containing clk/pdn/mdn, or onclick attr, or native <a>/<button>, or role=button/link. NEVER click elements with only blr/fcs (focus/blur) — they are not click targets.",
       "- If the text you want to click has no click signal, look at its parent row/container or nearby sibling that does have clk listener.",
-      "- No-effect fallback: if a click produced no page change (snapshot unchanged), do NOT repeat the same target. Instead: (1) look for <a> links or <button> inside the clicked container; (2) try a parent or sibling with stronger click signal; (3) as last resort, try navigate.goto to the target URL if visible in an href.",
+      "- No-effect fallback: if a click produced no page change (snapshot unchanged), do NOT repeat the same target. Instead: (1) look for <a> links or <button> inside the clicked container; (2) try a parent or sibling with stronger click signal; (3) try a completely different approach (e.g., search, filter, sidebar navigation, or use evaluate to trigger the action programmatically).",
 
       "- Batch fill/type/check/select_option freely within one round. A click always ends the round — send at most ONE click as the LAST action in a batch.",
       "- Input order (MANDATORY): focus/click → fill/type/select_option per target. Multi-field: focus A→fill A→focus B→fill B.",

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.49
+
+### 修复
+
+- **协议缺失停机过早终止多步 UI 导航任务**：
+  - 问题：MiniMax 等不输出 `REMAINING:` 协议的模型，在多步 click 导航场景（搜索→点击仓库→选择分支→切换 Tab）中，连续 5 轮 click 导致 `consecutiveNoProtocolRounds` 达到阈值而被强制终止，即使每次 click 都成功导航到了新页面
+  - 原因：`consecutiveNoProtocolRounds` 停机检查在快照指纹对比之前执行，click 不算 `isConfirmedProgressAction`，因此每轮都累加计数器
+  - 修复：将协议缺失停机检查（保护 5）移至快照刷新 + 指纹对比之后；若本轮 click 导致快照指纹变化（页面确实切换），重置计数器为 0
+  - 仅当连续多轮操作均无页面变化且无协议时，才触发停机
+
+### 文档
+
+- 同步更新 `LOOP_MECHANISM.md`：更新 §4.3 协议缺失容忍说明，新增快照指纹兜底逻辑描述，更新停机条件描述
+
 ## 0.0.48
 
 ### 新增
@@ -19,7 +33,7 @@
 ### 修复
 
 - **点击无效后模型不换目标**：
-  - 增强 System Prompt `No-effect fallback` 规则：从抽象的"try nearest sibling"改为具体三步回退——(1) 找容器内 `<a>`/`<button>` 子元素 (2) 尝试父/兄弟节点 (3) 用 `navigate.goto` 直接跳转
+  - 增强 System Prompt `No-effect fallback` 规则：从抽象的"try nearest sibling"改为具体三步回退——(1) 找容器内 `<a>`/`<button>` 子元素 (2) 尝试父/兄弟节点 (3) 换全新策略（搜索、侧栏导航、或用 `evaluate` 编程触发）
   - 增强 `Effect check` 规则：明确"快照没变 = click 失败"，必须换元素（如行内链接或按钮）
   - 增强 `Repeated action warning`（防自转提示）：注入具体行动方案——找容器内 `<a>`/`<button>`、用 href 直接导航、换全新策略
   - 增强 Round 1+ 上轮执行回顾提示：无效果时引导找子元素而非重复

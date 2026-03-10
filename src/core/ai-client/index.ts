@@ -4,27 +4,27 @@
  * 提供 provider 路由与统一类型导出。
  * Provides provider routing and unified type exports.
  */
-import type { AIClient, AIChatResponse, AIMessage } from "../types.js";
+import type { AIClient, AIMessage } from "../types.js";
 import type { ToolDefinition } from "../tool-registry.js";
 import { validateProvider } from "./constants.js";
-import { OpenAIClient } from "./openai.js";
-import { AnthropicClient } from "./anthropic.js";
-import { DeepSeekClient } from "./deepseek.js";
-import { DoubaoClient } from "./doubao.js";
-import { QwenClient } from "./qwen.js";
-import { MiniMaxClient } from "./minimax.js";
+import { OpenAIClient } from "./models/openai.js";
+import { AnthropicClient } from "./models/anthropic.js";
+import { DeepSeekClient } from "./models/deepseek.js";
+import { DoubaoClient } from "./models/doubao.js";
+import { QwenClient } from "./models/qwen.js";
+import { MiniMaxClient } from "./models/minimax.js";
 
 // Re-export 类型，方便外部统一从 ai-client 导入
 export type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "../types.js";
 
-// Re-export 客户端类（基类 + OpenAI + Anthropic）
+// Re-export 客户端类（基类 + 各 provider）
 export { BaseAIClient, type BaseAIClientOptions, type ChatHandlerParams } from "./custom.js";
-export { OpenAIClient, parseOpenAIStream } from "./openai.js";
-export { AnthropicClient, parseAnthropicStream } from "./anthropic.js";
-export { DeepSeekClient } from "./deepseek.js";
-export { DoubaoClient } from "./doubao.js";
-export { QwenClient } from "./qwen.js";
-export { MiniMaxClient } from "./minimax.js";
+export { OpenAIClient, parseOpenAIStream } from "./models/openai.js";
+export { AnthropicClient, parseAnthropicStream } from "./models/anthropic.js";
+export { DeepSeekClient } from "./models/deepseek.js";
+export { DoubaoClient } from "./models/doubao.js";
+export { QwenClient } from "./models/qwen.js";
+export { MiniMaxClient } from "./models/minimax.js";
 
 // ─── 公共类型定义 ───
 
