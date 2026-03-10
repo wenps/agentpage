@@ -271,6 +271,9 @@ export function buildCompactMessages(
   // 第 2 条 user 消息：执行上下文 + 协议约束 + 最新快照
   const hasErrors = trace.some(e => hasToolError(e.result));
   const contextParts: string[] = [
+    // 原始用户目标（对照组，防偏航）
+    `Original Goal: ${userMessage}`,
+    "",
     // 当前剩余任务（唯一待消费目标）
     `Remaining: ${activeInstruction}`,
     "",

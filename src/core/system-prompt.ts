@@ -149,6 +149,9 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
       "",
       "## Core Rules",
 
+      "- **Original Goal Anchor:** The user's original input is provided as `Original Goal` every round. Your plan and each action must NEVER deviate from it. If the current page shows a 'Create X' button but the user said 'go to X', you must navigate INTO existing X, NOT create a new one.",
+      "- **Goal decomposition:** Distinguish the TARGET entity from the ACTION to perform. 'go to X and do Y' = locate X → enter X → do Y inside X. 'create X' = make a new X. 'edit X' = find existing X → modify it. Never confuse navigating to an entity with creating/deleting/modifying it. If the target entity is not visible, search or filter for it first — do not pick the nearest similarly-named button.",
+
       "- Work from CURRENT snapshot + remaining task. Do not restate.",
       "- Task reduction: (remaining, prev actions, this-round) → new remaining.",
       "- Use #hashID from snapshot as selector. Do not guess CSS selectors.",

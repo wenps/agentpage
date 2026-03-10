@@ -66,6 +66,18 @@ const FILL_RELEVANT_EVENTS = new Set([
   "click", "mousedown", "pointerdown",
 ]);
 
+/** 仅含焦点类事件的集合——只绑定这些事件的元素不应作为 click 目标 */
+const FOCUS_ONLY_EVENTS = new Set(["blur", "focus", "focusin", "focusout"]);
+
+/** 点击信号事件集合 */
+const CLICK_SIGNAL_EVENTS = new Set(["click", "mousedown", "pointerdown", "mouseup", "pointerup"]);
+
+/** 原生可被点击的 ARIA role */
+const CLICKABLE_ROLES = new Set([
+  "button", "link", "tab", "menuitem", "menuitemcheckbox", "menuitemradio",
+  "option", "checkbox", "radio", "switch", "treeitem",
+]);
+
 // ─── 模块状态 ───
 
 let activeRefStore: RefStore | undefined;
@@ -581,6 +593,68 @@ function executePress(el: Element, key: string): void {
   }
 }
 
+// ─── 点击信号校验 ───
+
+/**
+ * 点击信号校验：检查目标元素是否具备可点击信号。
+ *
+ * 判定逻辑（仅在有正向证据时拦截）：
+ * - 原生可点击元素（a/button/summary/input[submit|button|reset]）→ 放行
+ * - 有 CLICKABLE_ROLES 中的 ARIA role → 放行
+ * - 有 onclick 属性 → 放行
+ * - 有 click/mousedown/pointerdown 等事件监听 → 放行
+ * - 无任何事件监听 → 放行（可能有事件委托）
+ * - 有事件监听但全部为 focus/blur 类 → 拦截
+ */
+function validateClickSignal(
+  el: Element,
+  selector: string,
+  action: string,
+): ToolCallResult | null {
+  // 原生可点击元素
+  // 注意：HTMLSummaryElement 在部分浏览器/WebView 环境中未定义，
+  // 使用 tagName 判定代替 instanceof 避免 ReferenceError。
+  if (
+    el instanceof HTMLAnchorElement ||
+    el instanceof HTMLButtonElement ||
+    el instanceof HTMLOptionElement ||
+    el.tagName === "SUMMARY" ||
+    (el instanceof HTMLInputElement && ["submit", "button", "reset"].includes(el.type))
+  ) {
+    return null;
+  }
+
+  // ARIA 可点击 role
+  const role = el.getAttribute("role");
+  if (role && CLICKABLE_ROLES.has(role)) return null;
+
+  // 内联 onclick
+  if (el.hasAttribute("onclick")) return null;
+
+  // 检查追踪到的事件
+  const trackedEvents = getTrackedElementEvents(el);
+  // 无追踪事件 → 放行（可能使用事件委托）
+  if (trackedEvents.length === 0) return null;
+
+  // 有至少一个点击信号事件 → 放行
+  if (trackedEvents.some(e => CLICK_SIGNAL_EVENTS.has(e))) return null;
+
+  // 有事件但全部为 focus/blur 类 → 拦截
+  if (trackedEvents.every(e => FOCUS_ONLY_EVENTS.has(e))) {
+    return {
+      content: [
+        `Element ${describeElement(el)} has NO click handler (listeners: ${trackedEvents.join(",")}).`,
+        `This element only has focus/blur listeners — it is NOT a valid click target.`,
+        `Look for a nearby <a>, <button>, or sibling/parent with clk/pdn/mdn listener instead.`,
+      ].join(" "),
+      details: { error: true, code: "NO_CLICK_SIGNAL", action, selector },
+    };
+  }
+
+  // 有其他事件（如 input/change）但无点击信号 → 放行（可能是有意义的交互）
+  return null;
+}
+
 // ─── 元素描述 ───
 
 function describeElement(el: Element): string {
@@ -793,6 +867,12 @@ export function createDomTool(): ToolDefinition {
           case "click": {
             const target = resolvePointerActionTarget(resolveFormItemControlTarget(retarget(el, force ? "none" : "button-link")));
             const clickCount = typeof params.clickCount === "number" ? params.clickCount : 1;
+
+            // 点击信号校验：阻止点击仅有 blur/focus 监听器的元素
+            if (!force) {
+              const noSignal = validateClickSignal(target, selector, action);
+              if (noSignal) return noSignal;
+            }
 
             // option 元素自动写回 select
             if (target instanceof HTMLOptionElement) {

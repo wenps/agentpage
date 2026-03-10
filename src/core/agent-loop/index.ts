@@ -59,6 +59,7 @@ import {
   isPotentialDomMutation,
   isConfirmedProgressAction,
   computeSnapshotFingerprint,
+  findNearbyClickTargets,
   sleep,
   toContentString,
   hasToolError,
@@ -67,6 +68,7 @@ import { readPageSnapshot, stripSnapshotFromPrompt } from "./snapshot.js";
 import { buildCompactMessages } from "./messages.js";
 import {
   checkRedundantSnapshot,
+  checkIneffectiveClickRepeat,
   applySnapshotDebounce,
   handleElementRecovery,
   handleNavigationUrlChange,
@@ -179,6 +181,14 @@ export async function executeAgentLoop(
   // 恢复与拦截统计
   let recoveryCount = 0;
   let redundantInterceptCount = 0;
+
+  // 重复无效点击拦截：记录已证实点击无效的 selector 集合。
+  // 轮次结束且快照未变时将本轮 click selector 加入；快照变化时仅移除本轮点击的 selector。
+  const ineffectiveClickSelectors = new Set<string>();
+
+  // 近 N 轮点击目标滑动窗口，用于检测交替点击循环（如 A→B→A→B）。
+  // 当窗口内唯一目标数 ≤ 2 且跨度 ≥ 4 轮时判定为循环，将目标全部加入 ineffectiveClickSelectors。
+  const recentRoundClickTargets: string[][] = [];
 
   type MissingToolTask = {
     name: string;
@@ -464,6 +474,8 @@ export async function executeAgentLoop(
     let roundHasConfirmedProgress = false;
     const executedTaskCalls: Array<{ name: string; input: unknown }> = [];
     const roundMissingTasks: MissingToolTask[] = [];
+    // 本轮实际执行的 click selector，用于轮末无效点击判定
+    const roundClickSelectors: string[] = [];
     for (const tc of response.toolCalls) {
 
       // 自动策略：当 AI 对 hash 列表执行 scroll 时，默认下一轮对该节点放宽 children 截断。
@@ -481,6 +493,19 @@ export async function executeAgentLoop(
         appendToolTrace(round, tc.name, tc.input, redundant);
         redundantInterceptCount += 1;
         callbacks?.onToolResult?.(tc.name, redundant);
+        continue;
+      }
+
+      // 保护 1.5：重复无效点击拦截（附带快照中的附近可点击元素推荐）
+      const ineffective = checkIneffectiveClickRepeat(
+        tc.name, tc.input, ineffectiveClickSelectors, pageContext.latestSnapshot,
+      );
+      if (ineffective) {
+        appendToolTrace(round, tc.name, tc.input, ineffective);
+        redundantInterceptCount += 1;
+        callbacks?.onToolCall?.(tc.name, tc.input);
+        callbacks?.onToolResult?.(tc.name, ineffective);
+        roundHasError = true;
         continue;
       }
 
@@ -512,6 +537,20 @@ export async function executeAgentLoop(
 
       appendToolTrace(round, tc.name, tc.input, result);
       executedTaskCalls.push({ name: tc.name, input: tc.input });
+
+      // 记录本轮成功执行的 click selector，用于轮末无效点击判定
+      if (
+        tc.name === "dom" &&
+        getToolAction(tc.input) === "click" &&
+        !hasToolError(result)
+      ) {
+        const sel = tc.input && typeof tc.input === "object"
+          ? (tc.input as { selector?: unknown }).selector
+          : undefined;
+        if (typeof sel === "string" && sel) {
+          roundClickSelectors.push(sel);
+        }
+      }
 
       const missingTask = collectMissingTask(tc.name, tc.input, result);
       if (missingTask) {
@@ -624,20 +663,94 @@ export async function executeAgentLoop(
     if (roundHasPotentialDomMutation) {
       const roundEndFingerprint = computeSnapshotFingerprint(pageContext.latestSnapshot || "");
       if (roundEndFingerprint === roundStartFingerprint && roundStartFingerprint !== "") {
+        // 查找各无效点击 selector 附近的可点击元素作为具体推荐
+        const nearbyHintLines: string[] = [];
+        for (const sel of roundClickSelectors) {
+          const nearby = findNearbyClickTargets(
+            pageContext.latestSnapshot || "", sel, ineffectiveClickSelectors,
+          );
+          if (nearby.length > 0) {
+            nearbyHintLines.push(`Nearby clickable alternatives for ${sel}:`);
+            for (const item of nearby) nearbyHintLines.push(`  → ${item}`);
+          }
+        }
+
         const unchangedHint = [
           "Snapshot unchanged after action:",
           "- The page snapshot is IDENTICAL before and after your action(s) this round.",
           "- Your click/action had NO visible effect on the page. Do NOT repeat it.",
-          "- Look INSIDE the target for <a>/<button>/child with clk listener, or try a parent/sibling with stronger signal, or use a completely different approach.",
+          ...(nearbyHintLines.length > 0
+            ? ["", "Try these nearby elements instead (sorted by proximity):", ...nearbyHintLines, ""]
+            : []),
+          "- If no suggestion above fits, look INSIDE the target for <a>/<button>/child with clk listener, or try a parent/sibling with stronger signal, or use a completely different approach.",
         ].join("\n");
         protocolViolationHint = protocolViolationHint
           ? protocolViolationHint + "\n\n" + unchangedHint
           : unchangedHint;
+
+        // 保护 7：将本轮无效 click selector 加入拦截集合，下一轮再次点击时直接拦截
+        for (const sel of roundClickSelectors) {
+          ineffectiveClickSelectors.add(sel);
+        }
       } else if (roundEndFingerprint !== roundStartFingerprint) {
         // 页面确实发生了变化：即使模型未遵循 REMAINING 协议，click 导航也属于真实推进。
         // 重置计数器，避免多步 UI 导航（如搜索→点击仓库→选择分支→切换 Tab）
         // 因连续 click 轮次被误判为协议缺失空转。
         consecutiveNoProtocolRounds = 0;
+        // 页面变化：仅移除本轮点击的 selector（可能是它们引发了变化），
+        // 保留之前已标记的无效 selector，防止交替点击循环逃逸。
+        // 旧页面的 hashID 不会出现在新页面快照中，因此保留不会误拦。
+        for (const sel of roundClickSelectors) {
+          ineffectiveClickSelectors.delete(sel);
+        }
+      }
+    }
+
+    // 保护 8：点击目标交替循环检测（如 A→B→A→B）。
+    // 记录本轮 click 目标并检测近 N 轮是否在 ≤2 个目标间循环。
+    if (roundClickSelectors.length > 0) {
+      recentRoundClickTargets.push([...roundClickSelectors]);
+      while (recentRoundClickTargets.length > 6) recentRoundClickTargets.shift();
+    }
+    if (recentRoundClickTargets.length >= 4) {
+      const recentWindow = recentRoundClickTargets.slice(-4);
+      const allTargets = recentWindow.flat();
+      const uniqueTargets = new Set(allTargets);
+      if (uniqueTargets.size <= 2 && allTargets.length >= 4) {
+        // 查找循环目标周围的可点击替代元素
+        const cycleNearbyLines: string[] = [];
+        for (const sel of uniqueTargets) {
+          const nearby = findNearbyClickTargets(
+            pageContext.latestSnapshot || "", sel, new Set([...ineffectiveClickSelectors, ...uniqueTargets]),
+          );
+          if (nearby.length > 0) {
+            cycleNearbyLines.push(`Alternatives near ${sel}:`);
+            for (const item of nearby) cycleNearbyLines.push(`  → ${item}`);
+          }
+        }
+
+        const cycleHint = [
+          "Click target cycling detected:",
+          `- You have been alternating between the same ${uniqueTargets.size} target(s) for ${recentWindow.length}+ rounds: ${[...uniqueTargets].join(", ")}`,
+          "- NONE of these clicks achieved navigation or meaningful page change.",
+          ...(cycleNearbyLines.length > 0
+            ? ["", "Try these nearby clickable alternatives instead:", ...cycleNearbyLines, ""]
+            : []),
+          "You MUST abandon ALL these targets. If no suggestion above fits, try:",
+          "  1) Look INSIDE the clicked container for <a>, <button>, or child with clk/pdn/mdn listener",
+          "  2) Navigate via URL: use navigate.goto to go to the target page directly",
+          "  3) Use evaluate to inspect the page and find the real navigation link",
+          "  4) Use a search/filter/sidebar navigation approach instead",
+        ].join("\n");
+        protocolViolationHint = protocolViolationHint
+          ? protocolViolationHint + "\n\n" + cycleHint
+          : cycleHint;
+        // 将所有循环目标加入无效集合，强制下一轮换目标
+        for (const sel of uniqueTargets) {
+          ineffectiveClickSelectors.add(sel);
+        }
+        // 清空窗口，重新开始跟踪
+        recentRoundClickTargets.length = 0;
       }
     }
 

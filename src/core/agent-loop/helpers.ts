@@ -17,6 +17,7 @@
  *   - `parseSnapshotExpandHints`：解析 `SNAPSHOT_HINT: EXPAND_CHILDREN`
  *   - `extractHashSelectorRef`：从 `#ref` 选择器提取 ref id
  *   - `computeSnapshotFingerprint`：剥离 hashID 后计算快照指纹，用于轮次间变化检测
+ *   - `findNearbyClickTargets`：从快照中查找指定 selector 附近的可点击元素，用于无效点击后的替代目标推荐
  * - 任务推进与协议：
  *   - `buildTaskArray`：将工具调用规整成稳定任务数组
  *   - `normalizeModelOutput`：压缩模型输出供下一轮上下文使用
@@ -116,6 +117,99 @@ function _djb2(str: string): string {
   }
   return (hash >>> 0).toString(36);
 }
+
+/**
+ * 从快照文本中查找指定 selector 附近的可点击元素。
+ *
+ * 当点击某个元素无效果时，框架需要推荐具体的替代目标而非泛泛的建议。
+ * 此函数在快照中定位目标 selector 所在行，然后在上下 windowSize 行内
+ * 扫描带有点击信号的元素，返回按距离排序的推荐列表。
+ *
+ * 点击信号判定：
+ * - listeners 属性含 clk / pdn / mdn
+ * - 有 onclick 属性
+ * - 标签为 [a] 或 [button]
+ * - role="button" 或 role="link"
+ *
+ * 返回：描述字符串数组（`#hashID ([tag] "text" listeners="...")`），最多 5 个。
+ *
+ * 用途：
+ * - `INEFFECTIVE_CLICK_BLOCKED` 拦截消息中附带推荐
+ * - "Snapshot unchanged" 提示中附带推荐
+ * - 交替循环检测提示中附带推荐
+ */
+export function findNearbyClickTargets(
+  snapshot: string,
+  selector: string,
+  excludeSelectors?: Set<string>,
+  windowSize = 15,
+): string[] {
+  if (!snapshot || !selector) return [];
+
+  const lines = snapshot.split("\n");
+  const selectorRef = selector.startsWith("#") ? selector : `#${selector}`;
+
+  // 定位 selector 所在行
+  let targetLineIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(selectorRef)) {
+      targetLineIdx = i;
+      break;
+    }
+  }
+  if (targetLineIdx === -1) return [];
+
+  const start = Math.max(0, targetLineIdx - windowSize);
+  const end = Math.min(lines.length - 1, targetLineIdx + windowSize);
+
+  // 点击信号正则：listeners 中含 clk/pdn/mdn、onclick、[a]/[button] 标签、role=button/link
+  const CLICK_SIGNAL_RE =
+    /(?:listeners="[^"]*\b(?:clk|pdn|mdn)\b[^"]*")|(?:\bonclick\b)|(?:\[a\])|(?:\[button\])|(?:role="(?:button|link)")/i;
+  const HASH_RE = /#([a-z0-9]{4,})\b/gi;
+  const TAG_RE = /\[([a-z0-9-]+)\]/i;
+  const TEXT_RE = /"([^"]{1,40})"/;
+
+  const candidates: Array<{ ref: string; distance: number; brief: string }> = [];
+
+  for (let i = start; i <= end; i++) {
+    if (i === targetLineIdx) continue;
+    const line = lines[i];
+    if (!CLICK_SIGNAL_RE.test(line)) continue;
+
+    HASH_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = HASH_RE.exec(line)) !== null) {
+      const ref = `#${match[1]}`;
+      if (ref === selectorRef) continue;
+      if (excludeSelectors?.has(ref)) continue;
+
+      const tag = TAG_RE.exec(line)?.[1] ?? "?";
+      const text = TEXT_RE.exec(line)?.[1] ?? "";
+      const listenerMatch = line.match(/listeners="([^"]*)"/);
+      const listeners = listenerMatch?.[1] ?? "";
+
+      const brief = text
+        ? `[${tag}] "${text}" listeners="${listeners}"`
+        : `[${tag}] listeners="${listeners}"`;
+
+      candidates.push({ ref, distance: Math.abs(i - targetLineIdx), brief });
+    }
+  }
+
+  // 按距离去重排序
+  candidates.sort((a, b) => a.distance - b.distance);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const c of candidates) {
+    if (seen.has(c.ref)) continue;
+    seen.add(c.ref);
+    result.push(`${c.ref} (${c.brief})`);
+    if (result.length >= 5) break;
+  }
+
+  return result;
+}
+
 /**
  * 构建任务数组。
  *

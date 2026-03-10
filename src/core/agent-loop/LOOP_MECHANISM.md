@@ -155,7 +155,21 @@ Agent Loop 是一个“快照驱动的增量执行循环”：
 
 - 连续返回相同任务批次且无错误时提前停机
 
-### 5.7 操作稳定性（轮次后双重等待）
+### 5.7 无效点击拦截与循环检测
+
+- 快照指纹未变时，将本轮 click selector 加入 `ineffectiveClickSelectors`，下一轮再次点击直接拦截。
+- 快照变化时，仅移除本轮点击的 selector（可能是它们引发了变化），保留其他轮次标记的无效 selector。
+  - 设计目的：防止模型在两个目标间交替点击时，其中一个引发轻微快照变化（如焦点样式）导致另一个被错误解锁。
+  - 旧页面的 hashID 不会出现在新页面快照中，因此保留不会误拦。
+- 交替循环检测：维护近 6 轮 click 目标滑动窗口；若最近 4 轮内唯一目标 ≤ 2 个且总点击 ≥ 4 次，判定为循环：
+  - 注入 "Click target cycling detected" 提示
+  - 将所有循环目标加入 ineffectiveClickSelectors 强制换目标
+  - 清空窗口重新开始跟踪
+- **附近可点击元素推荐（新增）**：当点击被拦截或证实无效时，使用 `findNearbyClickTargets()` 从快照中查找指定 selector 上下 15 行范围内带点击信号的元素，按距离排序后以 `#hashID (brief)` 格式注入提示。
+  - 触发场景：“Snapshot unchanged” 提示 / `INEFFECTIVE_CLICK_BLOCKED` 拦截响应 / 交替循环检测提示
+  - 设计目的：给模型具体的替代 hashID 而非泛泛建议，避免反复盲猜
+
+### 5.8 操作稳定性（轮次后双重等待）
 
 - 触发条件：本轮出现潜在 DOM 变化动作（例如 `dom.click/fill/select_option/scroll/press`、`navigate.*`、`evaluate`）且动作无错误。
 - 执行顺序固定：

@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.0.54
+
+### 修复
+
+- **`HTMLSummaryElement is not defined` 导致所有 click 失败**：
+  - `validateClickSignal()` 中使用 `instanceof HTMLSummaryElement` 判定原生可点击元素
+  - 部分浏览器/WebView 环境未定义该全局构造函数，导致 `ReferenceError` 抛出，所有 click 操作全部失败
+  - 改用 `el.tagName === "SUMMARY"` 替代，兼容所有环境
+
+## 0.0.53
+
+### 新增
+
+- **无效点击选择性清除**：
+  - 快照变化时不再 `clear()` 整个无效集合，改为仅移除本轮点击的 selector
+  - 保留其他轮次标记的无效 selector，防止交替点击循环中一个目标引发轻微快照变化（如焦点样式）导致另一个被错误解锁
+
+- **点击目标交替循环检测**：
+  - 维护近 6 轮 click 目标滑动窗口（`recentRoundClickTargets`）
+  - 若近 4 轮内唯一目标 ≤ 2 个且总点击 ≥ 4 次，判定为循环
+  - 将所有循环目标加入 `ineffectiveClickSelectors` 并注入警告提示
+  - 解决模型在两个无效目标间交替点击（A→B→A→B）无法被重复批次检测捕获的问题
+
+- **附近可点击元素推荐**：
+  - 新增 `findNearbyClickTargets()` 纯函数（helpers.ts）
+  - 当点击被拦截或证实无效时，自动从快照中查找目标上下 15 行内带点击信号的元素
+  - 按距离排序后以 `#hashID ([tag] "text" listeners="...")` 格式注入提示
+  - 三个触发场景：`INEFFECTIVE_CLICK_BLOCKED` 拦截响应 / "Snapshot unchanged" 提示 / 交替循环检测提示
+  - 让模型有明确的替代 hashID 可选，而非泛泛的"换个目标"建议
+
+## 0.0.52
+
+### 新增
+
+- **重复无效点击框架级拦截**：
+  - 新增 `checkIneffectiveClickRepeat()` 保护机制（recovery.ts）
+  - 当某个 click selector 在上一轮执行后快照未发生任何变化，该 selector 被标记为"无效"
+  - 下一轮模型再次点击同一 selector 时，框架直接拦截并返回错误提示，强制模型换目标
+  - 快照发生变化时自动清空无效集合（页面已改变，之前的判定失效）
+  - 解决弱模型（如 MiniMax）反复点击同一无效目标导致死循环的问题
+
+## 0.0.51
+
+### 新增
+
+- **原始目标锚定（Original Goal Anchor）**：
+  - Round 1+ 每轮 user 消息注入 `Original Goal: <用户原始输入>`，作为任务对照组
+  - 防止模型在多步执行过程中偏航（如把"去 X 仓库创建 issue"误解为"创建 X 仓库"）
+  - System Prompt 新增 Original Goal Anchor 规则：要求模型每步行动都对照原始目标，不偏离
+
+- **通用目标拆解规则（Goal Decomposition）**：
+  - System Prompt 新增 Goal decomposition 规则：区分目标实体（TARGET）和要执行的动作（ACTION）
+  - 覆盖 go to / create / edit / delete 等各类操作语义
+  - 核心原则：不把"导航到某实体"与"创建/删除/修改它"混淆；找不到目标时先搜索而非点击最近同名按钮
+
 ## 0.0.50
 
 ### 修复
