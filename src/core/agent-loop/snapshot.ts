@@ -1,14 +1,14 @@
 /**
  * DOM 快照生命周期管理。
  *
- * 负责 4 类能力：读取、包裹、去重、剥离。
+ * 负责 3 类能力：读取、包裹、剥离。
  *
  * 快照读取主流程：
  * 1) 组装快照参数（默认偏完整性）
  * 2) 调用 `page_info.snapshot`
  * 3) 将工具返回内容统一成字符串
  * 4) 由消息层进行包裹与注入
- * 5) 在多轮对话中去重旧快照
+ * 5) 剥离旧快照避免 token 累积
  *
  * 调用链：
  * - `agent-loop/index.ts` 在“无快照、每轮结束、导航后、恢复后”触发读取。
@@ -20,8 +20,9 @@
  * - 本文件通过 `readPageSnapshot()` 传参触发这些策略，不在 core 层直接操作 DOM。
  * - 这样保持分层：core 只声明策略参数，web 负责真实遍历与裁剪。
  */
+
+// 快照本身的能力是基于 page_info 的 tools 实现的
 import { ToolRegistry } from "../tool-registry.js";
-import type { AIMessage } from "../types.js";
 import {
   SNAPSHOT_END,
   SNAPSHOT_OUTDATED,
@@ -144,50 +145,6 @@ const SNAPSHOT_REGEX = new RegExp(
 /** 是否包含快照标记。 */
 function containsSnapshot(text: string): boolean {
   return text.includes(SNAPSHOT_START) && text.includes(SNAPSHOT_END);
-}
-
-/**
- * 去重消息快照。
- * 仅保留最后一份快照，旧快照替换为过期提示。
- *
- * 步骤：
- * 1) 扫描 tool 消息中的快照块引用。
- * 2) 保留最后一次快照，视为当前事实来源。
- * 3) 将更早快照替换为 `SNAPSHOT_OUTDATED`，避免模型引用旧状态。
- *
- * 返回语义：
- * - `true`: 至少发现了 1 份快照（可能发生替换，也可能只有一份无需替换）。
- * - `false`: 未发现任何快照标记。
- */
-export function deduplicateSnapshots(messages: AIMessage[]): boolean {
-  type SnapshotRef = {
-    items: Array<{ toolCallId: string; result: string }>;
-    index: number;
-  };
-  const refs: SnapshotRef[] = [];
-
-  for (const msg of messages) {
-    if (msg.role !== "tool" || !Array.isArray(msg.content)) continue;
-    const items = msg.content as Array<{ toolCallId: string; result: string }>;
-    for (let j = 0; j < items.length; j++) {
-      if (typeof items[j].result === "string" && containsSnapshot(items[j].result)) {
-        refs.push({ items, index: j });
-      }
-    }
-  }
-
-  if (refs.length <= 1) return refs.length > 0;
-
-  // 保留最后一份快照，将更早的快照替换为过期提示
-  for (let i = 0; i < refs.length - 1; i++) {
-    const ref = refs[i];
-    ref.items[ref.index].result = ref.items[ref.index].result.replace(
-      SNAPSHOT_REGEX,
-      SNAPSHOT_OUTDATED,
-    );
-  }
-
-  return true;
 }
 
 /**

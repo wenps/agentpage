@@ -69,7 +69,6 @@ import { buildCompactMessages } from "./messages.js";
 import {
   checkRedundantSnapshot,
   checkIneffectiveClickRepeat,
-  applySnapshotDebounce,
   handleElementRecovery,
   handleNavigationUrlChange,
   detectIdleLoop,
@@ -141,7 +140,6 @@ export async function executeAgentLoop(
   let finalReply = "";
 
   // 循环控制状态
-  let consecutiveSnapshotCalls = 0;
   let consecutiveReadOnlyRounds = 0;
   let consecutiveNoProtocolRounds = 0;
   let usedRounds = 0;
@@ -514,14 +512,7 @@ export async function executeAgentLoop(
       // 执行工具
       let result = await registry.dispatch(tc.name, tc.input);
 
-      // 保护 2：连续快照防抖
-      const debounced = applySnapshotDebounce(
-        tc.name, tc.input, result, consecutiveSnapshotCalls,
-      );
-      result = debounced.result;
-      consecutiveSnapshotCalls = debounced.consecutiveCount;
-
-      // 保护 3：元素未找到自动恢复
+      // 保护 2：元素未找到自动恢复
       const recovered = await handleElementRecovery(
         tc.name, tc.input, result,
         actionRecoveryAttempts, registry, pageContext, callbacks,

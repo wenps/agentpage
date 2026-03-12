@@ -413,13 +413,13 @@ function isCandidateFillTarget(el: Element): boolean {
   return false;
 }
 
-function executeFillOnResolvedTarget(
+async function executeFillOnResolvedTarget(
   target: Element,
   value: string,
   selector: string,
   action: string,
   sourceHint?: string,
-): ToolCallResult | null {
+): Promise<ToolCallResult | null> {
   if (target instanceof HTMLInputElement) {
     const type = target.type.toLowerCase();
     if (INPUT_BLOCKED_TYPES.has(type)) {
@@ -442,6 +442,8 @@ function executeFillOnResolvedTarget(
     scrollIntoViewIfNeeded(target);
     // 模拟真实用户交互：先 click 再 fill（dispatchClickEvents 内含 focus）
     dispatchClickEvents(target);
+    // 让出一个事件循环，等待框架异步 focus handler（如 Vue nextTick、BK-Input 后处理）执行完毕
+    await sleep(0);
     selectText(target);
     setNativeValue(target, value);
     dispatchInputEvents(target);
@@ -456,6 +458,7 @@ function executeFillOnResolvedTarget(
     scrollIntoViewIfNeeded(target);
     // 模拟真实用户交互：先 click 再 fill（dispatchClickEvents 内含 focus）
     dispatchClickEvents(target);
+    await sleep(0);
     selectText(target);
     setNativeValue(target, value);
     dispatchInputEvents(target);
@@ -481,6 +484,7 @@ function executeFillOnResolvedTarget(
   if (target instanceof HTMLElement && target.isContentEditable) {
     // 模拟真实用户交互：先 click 再 fill（dispatchClickEvents 内含 focus）
     dispatchClickEvents(target);
+    await sleep(0);
     selectText(target);
     if (value) document.execCommand("insertText", false, value);
     else document.execCommand("delete", false, undefined);
@@ -543,13 +547,15 @@ function guessNearbyFillTarget(anchor: Element, value: string): Element | null {
 // ─── selectText（参考 Playwright：input/textarea/contenteditable 三种策略） ───
 
 function selectText(el: Element): void {
-  if (el instanceof HTMLInputElement) { el.select(); el.focus(); return; }
-  if (el instanceof HTMLTextAreaElement) { el.selectionStart = 0; el.selectionEnd = el.value.length; el.focus(); return; }
+  // 先 focus 再选中：确保框架 focus handler（可能重置光标）先执行，
+  // 后续 select 覆盖其设置的光标位置，避免选区被撤销。
+  if (el instanceof HTMLInputElement) { el.focus(); el.select(); return; }
+  if (el instanceof HTMLTextAreaElement) { el.focus(); el.selectionStart = 0; el.selectionEnd = el.value.length; return; }
+  if (el instanceof HTMLElement) el.focus();
   const range = document.createRange();
   range.selectNodeContents(el);
   const sel = window.getSelection();
   if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-  if (el instanceof HTMLElement) el.focus();
 }
 
 // ─── 键盘：组合键支持（参考 Playwright Keyboard.press） ───
@@ -919,7 +925,7 @@ export function createDomTool(): ToolDefinition {
               if (!Number.isFinite(numericValue)) {
                 const guessed = guessNearbyFillTarget(target, value);
                 if (guessed) {
-                  const guessedResult = executeFillOnResolvedTarget(guessed, value, selector, action, "heuristic-nearby-target");
+                  const guessedResult = await executeFillOnResolvedTarget(guessed, value, selector, action, "heuristic-nearby-target");
                   if (guessedResult) return guessedResult;
                 }
                 return { content: `"${selector}" 为 role=slider，未找到可推断填写目标`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
@@ -927,7 +933,7 @@ export function createDomTool(): ToolDefinition {
 
               const linkedInput = findAssociatedSliderInput(target);
               if (linkedInput) {
-                const filled = executeFillOnResolvedTarget(linkedInput, String(numericValue), selector, action, `from ${describeElement(target)}`);
+                const filled = await executeFillOnResolvedTarget(linkedInput, String(numericValue), selector, action, `from ${describeElement(target)}`);
                 if (filled) return filled;
               }
 
@@ -946,19 +952,19 @@ export function createDomTool(): ToolDefinition {
 
               const guessed = guessNearbyFillTarget(target, String(numericValue));
               if (guessed) {
-                const guessedResult = executeFillOnResolvedTarget(guessed, String(numericValue), selector, action, "heuristic-nearby-target");
+                const guessedResult = await executeFillOnResolvedTarget(guessed, String(numericValue), selector, action, "heuristic-nearby-target");
                 if (guessedResult) return guessedResult;
               }
 
               return { content: `"${selector}" 为 role=slider，但未找到可写入输入框或可点击离散子项`, details: { error: true, code: "UNSUPPORTED_FILL_TARGET", action, selector } };
             }
 
-            const directFilled = executeFillOnResolvedTarget(target, value, selector, action);
+            const directFilled = await executeFillOnResolvedTarget(target, value, selector, action);
             if (directFilled) return directFilled;
 
             const guessed = guessNearbyFillTarget(target, value);
             if (guessed) {
-              const guessedResult = executeFillOnResolvedTarget(guessed, value, selector, action, "heuristic-nearby-target");
+              const guessedResult = await executeFillOnResolvedTarget(guessed, value, selector, action, "heuristic-nearby-target");
               if (guessedResult) return guessedResult;
             }
 

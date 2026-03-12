@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.56
+
+### 修复
+
+- **fill 单独调用时输入不生效（需先 focus 再 fill 才成功）**：
+  - `selectText()` 中 `focus()`/`select()` 调用顺序反了：先 `select()` 后 `focus()` 导致 UI 框架（BK-Input、el-input 等）的 focus handler 通过 `nextTick` 重置光标，撤销已选区
+  - 修正为先 `focus()` 后 `select()`，确保框架 handler 先执行，选区不被覆盖
+  - `executeFillOnResolvedTarget()` 中 `dispatchClickEvents`（触发 focus）与 `selectText`/`setNativeValue` 之间无异步间隔，框架的异步 focus handler（Vue `nextTick`、BK-Input 后处理等）在值写入后才执行，可能重置值或选区
+  - 在 `dispatchClickEvents` 后加 `await sleep(0)` 让出一个事件循环 tick，等待框架异步 handler 执行完毕后再写入值
+  - 影响范围：HTMLInputElement、HTMLTextAreaElement、contentEditable 三种 fill 路径均已修复
+
 ## 0.0.55
 
 ### 改进

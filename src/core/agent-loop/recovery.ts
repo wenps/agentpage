@@ -6,10 +6,10 @@
  *
  * 主要能力：
  * 1) 冗余拦截：拦住无意义的 `page_info.*` 调用
- * 2) 快照防抖：连续 snapshot 触发时给出警告并限制空转
- * 3) 找不到元素恢复：自动等待 + 刷新快照 + 重试上限
- * 4) 导航后刷新：导航成功后立刻更新快照上下文
- * 5) 空转检测：连续只读轮次触发停机信号 * 6) 重复无效点击拦截：对已证实无效的 click 目标做框架级拦截 *
+ * 2) 找不到元素恢复：自动等待 + 刷新快照 + 重试上限
+ * 3) 导航后刷新：导航成功后立刻更新快照上下文
+ * 4) 空转检测：连续只读轮次触发停机信号
+ * 5) 重复无效点击拦截：对已证实无效的 click 目标做框架级拦截
  * 一句话：这里是主循环的“保险丝层”。
  */
 import type { ToolCallResult } from "../tool-registry.js";
@@ -44,6 +44,7 @@ const REDUNDANT_PAGE_INFO_ACTIONS = new Set(["snapshot", "query_all", "get_url",
  * - 输入：`page_info.snapshot`
  * - 输出：`REDUNDANT_PAGE_INFO_SKIPPED`
  */
+// 大白话：拦截一些默认行为，因为快照每轮都会自动提供了，不需要模型再去请求了，直接用就好。避免模型反复请求快照或者一些基本信息，导致循环效率低下或者只看不做。
 export function checkRedundantSnapshot(
   toolName: string,
   toolInput: unknown,
@@ -65,46 +66,6 @@ export function checkRedundantSnapshot(
     };
   }
   return null;
-}
-
-/**
- * 快照防抖。
- *
- * 规则：连续触发 `page_info.snapshot` 时，第 2 次起标记为冗余，
- * 返回 `REDUNDANT_SNAPSHOT`，提醒模型直接使用已有快照继续执行。
- *
- * 返回值：
- * - `result`：可能被替换成防抖后的结果
- * - `consecutiveCount`：更新后的连续 snapshot 计数
- */
-export function applySnapshotDebounce(
-  toolName: string,
-  toolInput: unknown,
-  result: ToolCallResult,
-  consecutiveCount: number,
-): { result: ToolCallResult; consecutiveCount: number } {
-  if (toolName === "page_info" && getToolAction(toolInput) === "snapshot") {
-    const newCount = consecutiveCount + 1;
-    if (newCount >= 2) {
-      return {
-        consecutiveCount: newCount,
-        result: {
-          content: [
-            toContentString(result.content),
-            "Redundant snapshot detected. Continue with remaining actionable steps using the latest snapshot; avoid additional snapshot unless navigation or uncertainty changes.",
-          ].join("\n"),
-          details: {
-            error: true,
-            code: "REDUNDANT_SNAPSHOT",
-            consecutiveSnapshotCalls: newCount,
-          },
-        },
-      };
-    }
-    return { result, consecutiveCount: newCount };
-  }
-  // 非 snapshot 调用，重置计数
-  return { result, consecutiveCount: 0 };
 }
 
 // ─── 元素未找到自动恢复 ───
