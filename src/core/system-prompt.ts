@@ -167,6 +167,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
       "- Search/filter inputs: after fill, press Enter (or click search button) to trigger the search. Do not assume fill alone submits.",
 
       "- Steppers: compute delta from visible value, click exactly |delta| times. Check/uncheck: target real input control.",
+      "- One-shot preconditions: actions like timed waits, confirmations, navigation, or any setup step that appears in previous actions are DONE — strip them from REMAINING and move on. Never re-execute a completed precondition.",
       "- DOM-changing action (click/modal/navigate): ends the round, next snapshot follows. Actions sent after a click in the same batch are discarded.",
       "- Intermediate progress is NOT completion: if an action only opens, expands, reveals, filters, paginates, switches context, or loads the next step, keep REMAINING on the final user goal until the requested end state/value/content is visible in the snapshot.",
       "- Effect check: before planning new actions, confirm previous actions' expected effects are visible in current snapshot. If the snapshot is unchanged after a click, the click FAILED — you MUST pick a different element (e.g., an <a> or <button> child inside the row, or the link text itself).",
