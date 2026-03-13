@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.0.57
+
+### 重构
+
+- **web helpers 分层重组（base/ + actions/）**：
+  - 将 `dom-tool.ts`（1145→500 行）和 `wait-tool.ts` 中的所有工具函数提取到 `src/web/helpers/` 下
+  - 按职责拆分为两个子目录：
+    - `helpers/base/`：基础能力层（8 个模块）— 状态管理（active-store）、选择器解析（resolve-selector）、可见性判定（visibility）、元素检查（element-checks）、表单项检测（form-item）、事件模拟原语（event-dispatch）、键盘模拟（keyboard）、可操作性校验（actionability）
+    - `helpers/actions/`：动作执行层（4 个模块）— 目标重定向（retarget）、表单填充策略（fill-helpers）、自定义下拉交互（dropdown-helpers）、等待策略（wait-helpers）
+  - 两个子目录各提供 `index.ts` barrel 导出
+  - 工具文件（dom-tool / navigate-tool / page-info-tool / wait-tool / evaluate-tool）瘦身为纯 schema 定义 + action 分发层
+
+- **共享代码去重**：
+  - `getClickPoint`：actionability 从 event-dispatch 复用，移除重复中心点计算
+  - `collectSearchScopes`：findAssociatedSliderInput / guessNearbyFillTarget 共享作用域收集逻辑
+  - `isFormItemContainer` / `findFormItemContainer`：从 fill-helpers 和 retarget 提取到独立 form-item 模块
+
+- **框架通用化**：
+  - 表单项容器匹配从硬编码 `.el-form-item` 改为 `endsWith("form-item")` 泛化模式，覆盖 Element Plus / Ant Design / BK / TDesign 等
+
+- **工具文件 JSDoc 增强**：
+  - 5 个 tool 文件注释完善为结构化格式：职责说明、完整动作列表（含实现细节）、核心机制、依赖结构、运行环境
+
 ## 0.0.56
 
 ### 修复

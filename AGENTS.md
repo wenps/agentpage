@@ -56,12 +56,29 @@ src/
   ├── event-listener-tracker.ts  # 全局事件监听追踪器
   ├── ref-store.ts
   ├── messaging.ts
+  ├── helpers/
+  │   ├── base/             # 基础能力层（环境无关的纯工具函数）
+  │   │   ├── index.ts      # barrel 导出
+  │   │   ├── active-store.ts       # activeRefStore 模块级状态管理
+  │   │   ├── resolve-selector.ts   # #hashID / CSS 选择器统一解析
+  │   │   ├── visibility.ts         # 元素可见性判定（含 isStyleVisible + details/summary）
+  │   │   ├── element-checks.ts     # 元素状态检查（disabled / editable / blocked types）
+  │   │   ├── form-item.ts          # 表单项容器检测（泛化 endsWith 匹配）
+  │   │   ├── event-dispatch.ts     # Playwright 风格事件模拟原语（click/hover/input 事件链）
+  │   │   ├── keyboard.ts           # 键盘模拟（组合键解析 + keydown/keypress/keyup）
+  │   │   └── actionability.ts      # 可操作性校验（stable/scroll/hit-target/describe/click-signal）
+  │   └── actions/          # 动作执行层（与工具动作直接关联的高层逻辑）
+  │       ├── index.ts      # barrel 导出
+  │       ├── retarget.ts           # 目标重定向与归一化（Playwright retarget 模式）
+  │       ├── fill-helpers.ts       # 表单填充策略（分类型 fill + nearby 推断 + slider 关联）
+  │       ├── dropdown-helpers.ts   # 自定义下拉交互（弹窗等待 + 选项文本匹配）
+  │       └── wait-helpers.ts       # 等待策略（selector state / text / DOM stable）
   └── tools/
-    ├── dom-tool.ts
-    ├── navigate-tool.ts
-    ├── page-info-tool.ts
-    ├── wait-tool.ts
-    └── evaluate-tool.ts
+    ├── dom-tool.ts        # DOM 操作工具定义与分发（16 种 action）
+    ├── navigate-tool.ts   # 导航工具定义与分发（5 种 action）
+    ├── page-info-tool.ts  # 页面信息 + 快照生成引擎（6 种 action）
+    ├── wait-tool.ts       # 等待工具定义与分发（5 种 action）
+    └── evaluate-tool.ts   # JS 执行工具定义与分发（2 种 action）
 ```
 
 ## 3. 分层边界（必须遵守）
@@ -233,10 +250,25 @@ src/
 ### web
 
 - `index.ts`：WebAgent 对外 API，负责配置、记忆、autoSnapshot、callbacks
-- `tools/*.ts`：工具实现主文件（DOM/导航/信息/等待/执行）
-- `tools/dom-tool.ts`：对齐 Playwright 常见交互语义（事件链、select_option 多策略、fill 目标约束）
-- `tools/wait-tool.ts`：支持 selector state 等待语义（attached/visible/hidden/detached）
-- `tools/page-info-tool.ts`：快照输出运行态字段（selected/checked/disabled/readonly）
+- `helpers/base/`：基础能力层，提供不直接参与工具动作执行的底层纯函数
+  - `active-store.ts`：activeRefStore 模块级状态，解耦 dom-tool / page-info-tool / resolve-selector 的循环依赖
+  - `resolve-selector.ts`：统一选择器解析（#hashID 优先通过 RefStore，CSS 作为兼容回退）
+  - `visibility.ts`：元素可见性判定（含 `isStyleVisible` 递归检测 + `<details>/<summary>` 特殊处理）
+  - `element-checks.ts`：元素状态检查（`isElementDisabled` 含 ARIA disabled 祖先链、`isEditableElement`、`INPUT_BLOCKED_TYPES`）
+  - `form-item.ts`：表单项容器检测（`endsWith("form-item")` 泛化匹配 + `role="group"`，覆盖主流 UI 框架）
+  - `event-dispatch.ts`：Playwright 风格事件模拟原语（完整 click/hover/input 事件链、`setNativeValue`、`selectText`）
+  - `keyboard.ts`：键盘模拟（组合键解析 `splitKeyCombo`、keyCode 映射 `resolveKeyCode`、keydown/keypress/keyup 分发 `executePress`）
+  - `actionability.ts`：可操作性校验（位置稳定 `checkElementStable`、多策略滚动 `scrollIntoViewIfNeeded`、遮挡检测 `checkHitTarget`、点击信号校验 `validateClickSignal`、综合检查 `ensureActionable`）
+- `helpers/actions/`：动作执行层，与工具动作直接关联的高层组合逻辑
+  - `retarget.ts`：目标重定向与归一化（Playwright retarget 模式：非交互→button/link 回溯、label→control 关联、checkbox/radio/switch 归一化、formItem→control 重定向）
+  - `fill-helpers.ts`：表单填充策略（分类型 fill、nearby 不可编辑目标推断、slider 关联数值输入、`collectSearchScopes` 共享作用域收集）
+  - `dropdown-helpers.ts`：自定义下拉交互（`waitForDropdownPopup` 弹窗等待、`findVisibleOptionByText` 选项文本匹配，覆盖 ARIA listbox + 主流框架 popper）
+  - `wait-helpers.ts`：等待策略（selector state 四态判定、MutationObserver + 轮询双通道、文本等待、DOM 静默窗口）
+- `tools/dom-tool.ts`：DOM 操作工具定义与 action 分发（16 种动作），自身仅含 schema 定义 + 元素查找 + switch-case 分发，底层能力全部委托 helpers
+- `tools/navigate-tool.ts`：导航工具定义与分发（goto/back/forward/scroll/reload 5 种动作）
+- `tools/page-info-tool.ts`：页面信息工具 + DOM 快照序列化引擎（6 种动作），是 SDK 中最重的工具文件
+- `tools/wait-tool.ts`：等待工具定义与分发（5 种动作），底层逻辑委托 helpers/actions/wait-helpers
+- `tools/evaluate-tool.ts`：JS 执行工具定义与分发（2 种动作），自包含实现，无外部 helper 依赖
 - `dom-tool.ts` / `navigate-tool.ts` / `page-info-tool.ts` / `wait-tool.ts` / `evaluate-tool.ts`：兼容转发层，避免外部导入路径断裂
 - `event-listener-tracker.ts`：全局事件监听追踪器，通过 `EventTarget.prototype` 补丁拦截 `addEventListener/removeEventListener`，记录每个 Element 的运行时事件绑定。为快照的交互性判定（`hasInteractiveTrackedEvents`）、事件简写标注（`listeners="clk,inp,..."`）和优先级排序提供基础数据
 - `ref-store.ts`：`#hashID -> Element` 映射
