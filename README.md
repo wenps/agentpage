@@ -80,10 +80,11 @@ npm install agentpage
 - **Prompt + Tools + 路由三层解耦**：可以快速把"可执行 AI 能力"植入现有前端系统，按路由渐进式接入，支持"项目级工具 + 路由级工具"组合。
 - **增量任务消费协议（REMAINING）**：任务不是一次性执行，而是逐轮消费收敛。每轮只做当前快照可执行的动作，通过 `REMAINING` 协议跟踪进度，支持协议修复和启发式回退，确保复杂多步任务稳定收敛。
 - **原始目标锚定（Original Goal Anchor）**：Round 1+ 每轮消息注入用户原始输入作为任务对照组，防止模型在多步执行过程中偏航（如把“去 X 仓库创建 issue”误解为“创建 X 仓库”）。
-- **13 层保护机制**：元素恢复、Not-found 重试对话流、导航刷新、空转检测、重复批次防自转、协议修复、轮次稳定等待、快照指纹变化检测、快照变化摘要（Snapshot Diff）、无效点击拦截与循环检测、附近可点击元素推荐、原始目标锚定、停机原因可观测（stopReason） —— 目标是**稳定收敛**，而不是偶然成功。
+- **14 层保护机制**：元素恢复、Not-found 重试对话流、导航刷新、空转检测、重复批次防自转、协议修复、轮次稳定等待、快照指纹变化检测、快照变化摘要（Snapshot Diff）、无效点击拦截与循环检测、附近可点击元素推荐、原始目标锚定、断言验证（三阶段快照 + 死循环防护）、停机原因可观测（stopReason） —— 目标是**稳定收敛**，而不是偶然成功。
 - **Playwright 级别交互语义**：完整 pointer/mouse 事件链、4 种 scrollIntoView 策略轮换、actionability 五重检查（可见/稳定/可用/可编辑/遮挡）、智能重定向 retarget、隐藏控件代理点击（ElementPlus/AntD）、`select_option` value/label/index 三策略。
 - **运行时事件信号追踪**：通过 `EventTarget.prototype` 补丁全局追踪事件绑定，快照中输出 `listeners="clk,inp,chg"` 信号，帮助 AI 精准识别真实可交互元素，而非猜测。
 - **效果验证机制（Effect Check）**：每轮行动前自动检查上轮操作是否在当前快照中生效，未生效则尝试邻近元素，避免重复点击无效目标。
+- **AI 驱动的任务断言（Assertion）**：执行 AI 主动调用 `assert` 触发独立断言 AI 判定任务完成。三阶段快照设计（初始/动作后/当前）覆盖创建、跳转、状态变更等全场景；断言死循环防护确保不会无限重试。
 - **结构化可观测指标**：每次 chat 输出 `AgentLoopMetrics`（轮次、成功率、恢复次数、快照体积、Token 消耗、停机原因 `stopReason`），可直接接入监控系统。
 - **core/web 分层架构**：`core` 零 DOM 依赖，可在 Worker/Extension/Node 复用；`web` 封装浏览器能力。
 
@@ -237,8 +238,9 @@ Round 3: 执行 C → REMAINING: DONE
 | 无效点击拦截与循环检测 | 快照未变时记录无效 click；近 4 轮在 ≤2 个目标间循环 | 拦截重复无效点击；循环检测后将所有循环目标加入拦截集 |
 | 附近可点击元素推荐 | 点击被拦截或证实无效 | 从快照中查找目标附近 15 行内有点击信号的元素，按距离推荐 |
 | 原始目标锚定 | Round 1+ 每轮 | 注入用户原始任务作为对照组，防止多步执行中偏航 |
-| 断言验证（Assertion） | AI 主动调用 `assert({})` 工具 | 独立 AI 判定任务完成；全通过则停机，未通过注入进度继续循环 |
-| 停机原因可观测 | 每次停机时 | `metrics.stopReason` 输出枚举值（`converged` / `assertion_passed` / `repeated_batch` / `idle_loop` / `no_protocol` / `max_rounds` 等） |
+| 断言验证（Assertion） | AI 主动调用 `assert({})` 工具 | 独立 AI 判定任务完成（三阶段快照对比）；全通过则停机，未通过注入进度继续循环 |
+| 断言死循环防护 | 连续 2 轮仅调 assert（无其他工具）且都失败 | 自动停机 `stopReason = "assertion_loop"`，避免无限重试 |
+| 停机原因可观测 | 每次停机时 | `metrics.stopReason` 输出枚举值（`converged` / `assertion_passed` / `assertion_loop` / `repeated_batch` / `idle_loop` / `no_protocol` / `max_rounds` 等） |
 
 ### 5. 停机条件与 stopReason
 
@@ -248,6 +250,7 @@ Round 3: 执行 C → REMAINING: DONE
 | --- | --- |
 | `converged` | 模型返回 `REMAINING: DONE` 或 remaining 收敛为空 |
 | `assertion_passed` | AI 调用 `assert` 工具且所有任务断言均通过 |
+| `assertion_loop` | 连续 2 轮仅调 assert 且都失败（断言死循环防护） |
 | `repeated_batch` | 连续相同工具调用批次 ≥ 3 轮（防自转） |
 | `idle_loop` | 连续只读轮次触发空转检测 |
 | `no_protocol` | 连续多轮有工具调用但无 REMAINING 协议且无有效推进 |
@@ -262,17 +265,42 @@ Round 3: 执行 C → REMAINING: DONE
 ```
 AI 执行动作 → 认为完成 → 调用 assert({})
     ↓
-框架：等待页面稳定 → 清除 hover → 刷新快照
+拍取动作后快照（捕获瞬态反馈）
     ↓
-独立断言 AI（专用 Prompt，无 tools）判定任务是否完成
+等待页面稳定 → 清除 hover → 刷新快照
+    ↓
+独立断言 AI（专用 Prompt，无 tools）基于三阶段快照判定
     ↓
 全部通过 → stopReason: "assertion_passed"
 部分失败 → 注入 Assertion Progress → 继续循环
 ```
 
-**默认行为**：无自定义断言时，以用户原始消息作为整体断言依据。
+#### 三阶段快照设计
 
-**自定义断言**：
+断言 AI 同时接收三份快照，覆盖不同阶段的页面状态：
+
+| 快照 | 拍取时机 | 用途 |
+| --- | --- | --- |
+| **Initial** | 任务开始前 | 基线对比：判断创建/修改/删除等长任务是否完成 |
+| **Post-Action** | 工具执行完成后、稳定等待前 | 捕获瞬态反馈：成功提示、确认弹窗等跳转后消失的信息 |
+| **Current** | 稳定等待 + hover 清除后 | 最终状态：确认页面实际结果 |
+
+这个设计解决了真实 B 端场景中的关键问题：
+
+- **创建类任务**：Initial 快照显示 2 个实例，Current 显示 3 个 → 断言 AI 通过 before/after 对比判定创建成功
+- **提交后跳转**：点击“确认开通”后出现成功提示，然后自动跳转回列表页 → Post-Action 捕获到“实例已提交开通”，即使 Current 已是列表页也能判定通过
+- **状态变更**：Current 快照直接看到开关状态、勾选状态、评分等 UI 变化
+- **无跳转场景**：Post-Action 与 Current 相同时自动去重，不浪费 token
+
+#### 断言死循环防护
+
+连续 2 轮执行 AI 仅调用 `assert`（无其他工具）且都失败时，自动停机 `stopReason = "assertion_loop"`，避免无限重试。
+
+#### 默认行为
+
+无自定义断言时，以用户原始消息作为整体断言依据。
+
+#### 自定义断言
 
 ```ts
 const result = await agent.chat("关闭开关，满意度五星，标签选灰度", {
@@ -422,12 +450,14 @@ console.log(result.assertionResult);
 
 ### assert — 任务断言
 
-AI 认为任务完成时主动调用 `assert({})`，框架发起独立 AI 判定（专用 Prompt、无 tools、不继承 system prompt），基于当前快照 + 已执行操作验证任务是否真正完成。
+AI 认为任务完成时主动调用 `assert({})`，框架发起独立 AI 判定（专用 Prompt、无 tools、不继承 system prompt），基于三阶段快照对比验证任务是否真正完成。
 
+- **三阶段快照**：初始快照（before）+ 动作后快照（捕获瞬态成功提示）+ 当前快照（最终状态）
 - **默认行为**：无自定义断言时，以用户原始消息作为整体断言依据
 - **自定义断言**：通过 `ChatOptions.assertionConfig.taskAssertions` 传入细粒度子任务断言
 - **断言全通过**：`stopReason = "assertion_passed"`，循环终止
 - **部分失败**：失败原因注入下一轮 `## Assertion Progress` 区块，AI 聚焦修复后再次触发断言
+- **死循环防护**：连续 2 轮仅调 assert 且都失败时自动停机
 - **hover 清除**：断言前自动派发 `pointerleave`/`mouseleave` 清除瞬态视觉状态，确保快照反映持久状态
 
 ---
@@ -537,7 +567,7 @@ agent.callbacks = {
 | `redundantInterceptCount` | 冗余拦截次数 |
 | `snapshotReadCount` / `latestSnapshotSize` / `avgSnapshotSize` / `maxSnapshotSize` | 快照统计 |
 | `inputTokens` / `outputTokens` | Token 消耗 |
-| `stopReason` | 停机原因枚举（`converged` / `assertion_passed` / `repeated_batch` / `idle_loop` / `no_protocol` / `protocol_fix_failed` / `max_rounds` / `dry_run`） |
+| `stopReason` | 停机原因枚举（`converged` / `assertion_passed` / `assertion_loop` / `repeated_batch` / `idle_loop` / `no_protocol` / `protocol_fix_failed` / `max_rounds` / `dry_run`） |
 
 ### AgentLoopResult
 
