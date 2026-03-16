@@ -152,7 +152,7 @@ export class WebAgent {
   /** 默认系统提示词 key（兼容旧版 setSystemPrompt(prompt)）。 */
   private static readonly DEFAULT_SYSTEM_PROMPT_KEY = "default";
   /** 默认内置工具名（注册后受保护，不允许删除）。 */
-  private static readonly DEFAULT_TOOL_NAMES = ["dom", "navigate", "page_info", "wait", "evaluate", "assert"] as const;
+  private static readonly DEFAULT_TOOL_NAMES = ["dom", "navigate", "page_info", "wait", "evaluate", "assert", "plan_and_execute"] as const;
 
   /** 用户传入的自定义 AI 客户端实例（优先级高于 token/provider） */
   private client?: AIClient;
@@ -235,6 +235,20 @@ export class WebAgent {
       schema: Type.Object({}),
       execute: async () => ({
         content: "Assertion handled by framework.",
+      }),
+    });
+
+    // plan_and_execute 是内置工具——AI 面对复杂表单页面时主动调用，
+    // 实际逻辑在 agent-loop 层拦截处理（分解 + 微循环执行）。
+    this.registry.register({
+      name: "plan_and_execute",
+      description: "Decompose and execute complex page operations (5+ form fields, multiple dropdowns, etc.). The framework will: 1) plan atomic sub-tasks from snapshot, 2) batch-execute simple operations directly, 3) micro-loop complex interactions. Use for complex forms; for simple 1-3 field operations, use dom tools directly.",
+      schema: Type.Object({
+        goal: Type.String({ description: "High-level goal for this page (e.g., 'Fill the customer form with: name=X, dept=Y, priority=Z')" }),
+        hints: Type.Optional(Type.String({ description: "Optional hints about field locations or interaction strategies" })),
+      }),
+      execute: async () => ({
+        content: "Decomposition handled by framework.",
       }),
     });
 

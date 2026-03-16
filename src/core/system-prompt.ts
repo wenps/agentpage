@@ -170,6 +170,7 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
       "- No-effect fallback: if a click produced no page change (snapshot unchanged), do NOT repeat the same target. Instead: (1) look for <a> links or <button> inside the clicked container; (2) try a parent or sibling with stronger click signal; (3) try a completely different approach (e.g., search, filter, sidebar navigation, or use evaluate to trigger the action programmatically).",
 
       "- Batch fill/type/check/select_option freely within one round. A click always ends the round — send at most ONE click as the LAST action in a batch.",
+      "- **Forms with 4+ controls: use `plan_and_execute` tool** — it decomposes, batch-fills, and micro-loops pickers automatically. Do NOT manually fill forms field by field when plan_and_execute is available.",
       "- fill/type/select_option auto-focus: these actions automatically click and focus the target before input — do NOT send a separate focus/click before them.",
       "- Search/filter inputs: after fill, press Enter (or click search button) to trigger the search. Do not assume fill alone submits.",
 
@@ -254,6 +255,33 @@ export function buildSystemPrompt(params: SystemPromptParams = {}): string {
       "Call the `assert` tool with no parameters: `assert({})`",
       "The framework handles all assertion logic internally.",
     );
+
+    sections.push(lines.join("\n"));
+  }
+
+  // ─── 章节 7：任务分解能力说明 ───
+  // plan_and_execute 工具让 AI 在面对复杂表单页面时可以触发子任务分解。
+  {
+    const lines: string[] = [
+      "## Task Decomposition (IMPORTANT)",
+      "You have a `plan_and_execute` tool. It decomposes complex page work into sub-tasks and executes them efficiently (batch fills + micro-loops for popups).",
+      "",
+      "### MUST use when",
+      "- The page has 4+ form controls to operate (inputs, dropdowns, checkboxes, radios, pickers, sliders, switches, etc.).",
+      "- The snapshot shows a form with mixed control types (text + dropdown + checkbox + picker).",
+      "- The user's goal involves filling/completing a form or setting multiple fields.",
+      "Using plan_and_execute in these cases is MUCH more efficient and reliable than doing fields one by one.",
+      "",
+      "### Do NOT use when",
+      "- 1-3 simple operations: just use dom tools directly.",
+      "- Pure navigation or single click.",
+      "",
+      "### How to call",
+      "Call on Round 0 (first round) when you see a complex form. Include ALL required field values in the goal.",
+      '`plan_and_execute({ goal: "Fill form: username=X, email=Y, city=Z, priority=High, theme color=#ff0000, satisfaction=5 stars, ...", hints: "optional" })`',
+      "The framework will: decompose into sub-tasks → batch-execute simple ones → micro-loop complex ones → return results.",
+      "This blocks the current round. After completion, you receive a summary and a fresh snapshot to continue.",
+    ];
 
     sections.push(lines.join("\n"));
   }

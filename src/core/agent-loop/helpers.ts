@@ -391,7 +391,8 @@ export function buildTaskArray(toolCalls: Array<{ name: string; input: unknown }
  * ``` */
 export function normalizeModelOutput(text: string | undefined): string {
   if (!text) return "";
-  const trimmed = text.trim();
+  // 剥离 <think>...</think> 推理标签，避免推理内容污染协议解析
+  const trimmed = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   if (!trimmed) return "";
   const remainingMatch = trimmed.match(/REMAINING\s*:\s*([\s\S]*)$/i);
   if (remainingMatch) return `REMAINING: ${remainingMatch[1].trim()}`;
@@ -432,8 +433,12 @@ export function normalizeModelOutput(text: string | undefined): string {
  */
 export function parseRemainingInstruction(text: string | undefined): string | null {
   if (!text) return null;
+  // 剥离 <think>...</think> 推理标签（DeepSeek / MiniMax 等模型），
+  // 避免推理过程中出现的 "REMAINING: DONE" 之类文本被误解析为协议指令。
+  const stripped = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  if (!stripped) return null;
   // 按行从后往前找最后一个 REMAINING: 行（模型可能在 DONE 后输出总结文本）
-  const lines = text.split("\n");
+  const lines = stripped.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const lineMatch = lines[i].match(/REMAINING\s*:\s*(.*)$/i);
     if (lineMatch) {

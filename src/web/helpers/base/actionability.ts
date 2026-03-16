@@ -174,8 +174,11 @@ export function validateClickSignal(
   // 有至少一个点击信号事件 → 放行
   if (trackedEvents.some(e => CLICK_SIGNAL_EVENTS.has(e))) return null;
 
-  // 有事件但全部为 focus/blur 类 → 拦截
+  // 有事件但全部为 focus/blur 类 → 检查祖先事件委托
+  // 常见场景：日期选择器的 <td> 有 focus 监听（键盘导航），
+  // 但 click 事件委托在父级 <table> 上。此时应放行。
   if (trackedEvents.every(e => FOCUS_ONLY_EVENTS.has(e))) {
+    if (hasAncestorClickSignal(el)) return null;
     return {
       content: [
         `Element ${describeElement(el)} has NO click handler (listeners: ${trackedEvents.join(",")}).`,
@@ -188,4 +191,26 @@ export function validateClickSignal(
 
   // 有其他事件（如 input/change）但无点击信号 → 放行（可能是有意义的交互）
   return null;
+}
+
+// ─── 祖先事件委托检测 ───
+
+/**
+ * 检查元素祖先链中是否存在点击信号事件（事件委托模式检测）。
+ *
+ * 常见场景：
+ * - 日期选择器：<td> 有 focus 监听，click 委托在祖先 <table> 上
+ * - 列表组件：<li> 有 focus 监听，click 委托在祖先 <ul> 上
+ *
+ * 向上最多检查 5 层祖先，避免过深遍历。
+ */
+function hasAncestorClickSignal(el: Element): boolean {
+  const maxDepth = 5;
+  let current = el.parentElement;
+  for (let i = 0; i < maxDepth && current; i++) {
+    const events = getTrackedElementEvents(current);
+    if (events.some(e => CLICK_SIGNAL_EVENTS.has(e))) return true;
+    current = current.parentElement;
+  }
+  return false;
 }

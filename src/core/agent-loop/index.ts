@@ -78,6 +78,7 @@ import {
   detectIdleLoop,
 } from "./recovery/index.js";
 import { evaluateAssertions } from "./assertion/index.js";
+import { executeDecomposition } from "./decomposition/index.js";
 import type {
   AgentLoopParams,
   AgentLoopResult,
@@ -501,11 +502,14 @@ export async function executeAgentLoop(
 
     // ═══ 阶段 4：执行工具调用（带保护机制）═══
 
-    // 分离 assert 调用与普通工具调用：
-    // assert 需要在所有操作工具执行完 + 页面稳定后再发起，
-    // 以便基于最新快照做判定。
-    const regularToolCalls = response.toolCalls.filter(tc => tc.name !== "assert");
+    // 分离 assert / plan_and_execute 调用与普通工具调用：
+    // - assert 需要在所有操作工具执行完 + 页面稳定后再发起
+    // - plan_and_execute 进入分解执行引擎（阻塞当前轮次）
+    const regularToolCalls = response.toolCalls.filter(
+      tc => tc.name !== "assert" && tc.name !== "plan_and_execute",
+    );
     const assertToolCall = response.toolCalls.find(tc => tc.name === "assert");
+    const decompToolCall = response.toolCalls.find(tc => tc.name === "plan_and_execute");
 
     // 批量执行所有工具调用
     // roundHasError 用于控制"重复批次停机"：上一轮有错误时，不应武断终止。
@@ -680,6 +684,39 @@ export async function executeAgentLoop(
     } else {
       // 本轮无 assert 调用：重置计数
       consecutiveAssertOnlyFailedRounds = 0;
+    }
+
+    // ═══ 任务分解执行：plan_and_execute 工具调用时进入分解引擎（阻塞当前轮次）═══
+    if (decompToolCall) {
+      const decompInput = (decompToolCall.input ?? {}) as Record<string, unknown>;
+      const decompGoal = typeof decompInput.goal === "string" ? decompInput.goal : remainingInstruction;
+      const decompHints = typeof decompInput.hints === "string" ? decompInput.hints : undefined;
+
+      callbacks?.onToolCall?.("plan_and_execute", decompToolCall.input);
+
+      const decompResult = await executeDecomposition(decompGoal, decompHints, {
+        client,
+        registry,
+        pageContext,
+        refreshSnapshot,
+        runStabilityBarrier: runRoundStabilityBarrier,
+        callbacks,
+      });
+
+      const decompToolResult = {
+        content: decompResult.summary,
+        details: { decompositionResult: decompResult },
+      };
+      appendToolTrace(round, "plan_and_execute", decompToolCall.input, decompToolResult);
+      executedTaskCalls.push({ name: "plan_and_execute", input: decompToolCall.input });
+      callbacks?.onToolResult?.("plan_and_execute", decompToolResult);
+
+      // 分解执行后强制刷新快照
+      await refreshSnapshot();
+
+      // 分解执行视为确认性进展 + 潜在 DOM 变更
+      roundHasConfirmedProgress = true;
+      roundHasPotentialDomMutation = true;
     }
 
     if (roundMissingTasks.length > 0) {
