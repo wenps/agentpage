@@ -134,8 +134,24 @@ export type {
 } from "./micro-task/index.js";
 export { createExecutionRecordChain, TaskMonitor } from "./micro-task/index.js";
 
+// ─── 微任务提示词 ───
+export { buildMicroTaskPrompt } from "./micro-task/prompt.js";
+export type { MicroTaskPromptParams } from "./micro-task/prompt.js";
+
 // ─── Engine（决策循环）───
 export { executeAgentLoop } from "./engine/index.js";
+
+// ─── 系统提示词 ───
+export { buildSystemPrompt } from "./shared/system-prompt.js";
+export type { SystemPromptParams } from "./shared/system-prompt.js";
+
+// ─── Main Agent ───
+export { MainAgent } from "./main-agent/index.js";
+export type { MainAgentOptions, MainAgentResult, ChatOptions, OrchestrationOptions, ConversationEntry } from "./main-agent/index.js";
+
+// ─── Main Agent Dispatch（微任务执行桥梁）───
+export { executeMicroTask } from "./main-agent/dispatch.js";
+export type { ExecuteMicroTaskParams } from "./main-agent/dispatch.js";
 
 // ─── AI 客户端 ───
 export { createAIClient } from "./shared/ai-client/index.js";

@@ -38,3 +38,7 @@ export type {
 // ─── 实现 ───
 export { createExecutionRecordChain } from "./record.js";
 export { TaskMonitor } from "./task-monitor.js";
+
+// ─── 微任务提示词 ───
+export { buildMicroTaskPrompt } from "./prompt.js";
+export type { MicroTaskPromptParams } from "./prompt.js";

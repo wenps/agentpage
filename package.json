@@ -35,7 +35,9 @@
     "format": "oxfmt --write",
     "format:check": "oxfmt --check",
     "demo": "pnpm --dir demo dev",
+    "demo:v2": "pnpm --dir demo-v2 dev",
     "demo:install": "pnpm --dir demo install",
+    "demo:v2:install": "pnpm --dir demo-v2 install",
     "test": "vitest run",
     "test:watch": "vitest"
   },
