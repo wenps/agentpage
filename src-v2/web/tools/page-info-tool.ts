@@ -50,8 +50,8 @@ export function createPageInfoTool(): ToolDefinition {
   return {
     name: "page_info",
     description: [
-      "Page information tool.",
-      "Actions: get_url, get_title, get_selection, get_viewport, query_all.",
+      "Page information tool.", // 页面信息工具
+      "Actions: get_url, get_title, get_selection, get_viewport, query_all.", // 支持的动作：get_url、get_title、get_selection、get_viewport、query_all
     ].join(" "),
 
     schema: Type.Object({

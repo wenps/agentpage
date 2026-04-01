@@ -83,8 +83,8 @@ export function createEvaluateTool(): ToolDefinition {
   return {
     name: "evaluate",
     description: [
-      "Execute JavaScript in page context.",
-      "Use when other tools are insufficient; can access document and window.",
+      "Execute JavaScript in page context.", // 简洁描述
+      "Use when other tools are insufficient; can access document and window.", // 用当其他工具无法满足需求时；可访问 document 和 window
     ].join(" "),
 
     schema: Type.Object({

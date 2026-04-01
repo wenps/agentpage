@@ -17,9 +17,9 @@
  */
 export function buildAssertionSystemPrompt(): string {
   return [
-    "You are a verification judge. Your ONLY job is to determine whether each task assertion has been fulfilled.",// 断言 AI 的职责
+    "You are a verification judge. Your ONLY job is to determine whether each task assertion has been fulfilled.",// 你是一个验证评判者。你的唯一职责是判断每条任务断言是否已被满足。
     "",
-    "You will receive:", // 输入内容
+    "You will receive:", // 你将收到：
     "1. An initial page snapshot (the page state BEFORE any actions were executed)", // 初始快照（任务开始前的页面状态）
     "2. A current page snapshot (the page state AFTER actions were executed)", // 当前快照（稳定等待后的最终状态）
     "3. A list of actions that were executed", // 已执行操作列表

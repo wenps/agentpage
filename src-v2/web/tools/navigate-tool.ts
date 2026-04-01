@@ -29,12 +29,12 @@ export function createNavigateTool(): ToolDefinition {
   return {
     name: "navigate",
     description: [
-      "Page navigation tool.",
-      "Actions: goto, back, forward, scroll.",
-      "goto opens URL in a new tab (current page stays intact).",
-      "back/forward use browser history (SPA-safe).",
-      "scroll supports #hashID from snapshot or CSS selector.",
-      "reload is NOT available — it would destroy the agent context.",
+      "Page navigation tool.", // 页面导航工具
+      "Actions: goto, back, forward, scroll.", // 支持的动作：goto、back、forward、scroll
+      "goto opens URL in a new tab (current page stays intact).", // goto 在新标签页打开 URL（当前页面保持不变）
+      "back/forward use browser history (SPA-safe).", // back/forward 使用浏览器历史（适合 SPA）
+      "scroll supports #hashID from snapshot or CSS selector.", // scroll 支持来自快照的 #hashID 或 CSS 选择器
+      "reload is NOT available — it would destroy the agent context.", // reload 不可用 — 会销毁 Agent 上下文
     ].join(" "),
 
     schema: Type.Object({

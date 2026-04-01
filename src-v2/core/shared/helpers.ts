@@ -545,8 +545,7 @@ export function reduceRemainingHeuristically(
 
   const normalized = currentInstruction
     .replace(/\s+/g, " ")
-    .replace(/(->|=>|→)/g, " 然后 ")
-    .replace(/[，,。；;]/g, " 然后 ");
+    .replace(/(->|=>|→)/g, " 然后 ");
 
   const parts = normalized
     .split(/\s*(?:然后|再|并且|并|接着|随后|之后)\s*/g)
@@ -565,25 +564,34 @@ export function reduceRemainingHeuristically(
 /** 多步任务拆分正则（复用 reduceRemainingHeuristically 的分隔符） */
 const TASK_SPLIT_RE = /\s*(?:然后|再|并且|并|接着|随后|之后)\s*/g;
 
-/** 标准化分隔符（逗号、箭头等统一为"然后"），然后拆分 */
+/**
+ * 标准化分隔符（箭头统一为"然后"），然后按显式步骤词拆分。
+ *
+ * 注意：不再将中文标点（逗号、句号、分号）替换为"然后"。
+ * 中文逗号绝大多数是句内停顿（"创建一个实例，选择华东零售"），
+ * 不是步骤分隔。用户真正需要多步时会用显式词（然后/再/接着）。
+ */
 function _normAndSplit(text: string): string[] {
   const normalized = text
     .replace(/\s+/g, " ")
-    .replace(/(->|=>|→)/g, " 然后 ")
-    .replace(/[，,。；;]/g, " 然后 ");
+    .replace(/(->|=>|→)/g, " 然后 ");
   return normalized.split(TASK_SPLIT_RE).map(s => s.trim()).filter(Boolean);
 }
 
 /**
  * 将用户输入拆分为结构化任务列表。
  *
- * 仅当文本包含步骤分隔符（然后/再/接着/逗号/箭头等）且可拆出 ≥ 2 步时才返回 TaskItem 数组。
- * 单步任务返回 null，由调用方决定不启用 checklist。
+ * 仅当文本包含步骤分隔符（然后/再/接着/箭头等）且可拆出 **≥ 2 步** 时才返回 TaskItem 数组。
+ * checklist 的作用是让 AI 看到完整的任务全貌，AI 根据当前页面状态判断哪些任务可以完成。
+ * 任务完成由 AI 通过 REMAINING 协议驱动 — AI 看页面，能做就做，做完就消费。
  *
  * @example
  * ```ts
  * splitUserGoalIntoTasks("主题色选红色，然后关闭开关，然后满意度五星")
  * // → [{ text: "主题色选红色", done: false }, { text: "关闭开关", done: false }, { text: "满意度五星", done: false }]
+ *
+ * splitUserGoalIntoTasks("创建一个实例，然后要选择华东零售")
+ * // → [{ text: "创建一个实例", done: false }, { text: "要选择华东零售", done: false }]
  *
  * splitUserGoalIntoTasks("提交表单")
  * // → null（单步，不拆分）
@@ -598,8 +606,15 @@ export function splitUserGoalIntoTasks(userMessage: string): TaskItem[] | null {
 /**
  * 根据当前 remaining 字符串更新任务完成状态。
  *
- * 策略：如果某个 task 的文本关键词不再出现在 remaining 中，标记为 done。
- * remaining 为空或 "DONE" 时，全部标记完成。
+ * 策略（AI 驱动的任务消费）：
+ * 1. remaining 为空或 "DONE" 时，全部标记完成。
+ * 2. 否则，检查每个任务的关键词是否仍在 remaining 中：
+ *    - 关键词全部不在 remaining → 标记 done（AI 已消费该任务）
+ *    - 关键词仍在 remaining → 保持未完成
+ *
+ * 不使用严格顺序 — AI 根据当前页面状态决定哪些任务可以完成。
+ * 例如 "创建实例，然后选择华东零售"，如果页面上已经可以选择华东零售，
+ * AI 就选它并通过 REMAINING 协议消费掉，不需要等"创建"先完成。
  *
  * 返回更新后的 TaskItem 数组（不修改原数组）。
  */
@@ -610,15 +625,28 @@ export function updateTaskCompletion(tasks: TaskItem[], remaining: string): Task
   }
 
   const lowerRemaining = trimmed.toLowerCase();
-  return tasks.map(t => {
-    if (t.done) return t;
+  const result: TaskItem[] = [];
+
+  for (const t of tasks) {
+    if (t.done) {
+      result.push(t);
+      continue;
+    }
     // 提取 task 中 ≥ 2 字的中文词或 ≥ 3 字的英文词作为关键词
     const keywords = t.text.match(/[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}/g);
-    if (!keywords || keywords.length === 0) return t;
-    // 所有关键词都不在 remaining 中 → 认为该任务已完成
+    if (!keywords || keywords.length === 0) {
+      result.push(t);
+      continue;
+    }
+    // 所有关键词都不在 remaining 中 → AI 已消费该任务
     const allAbsent = keywords.every(kw => !lowerRemaining.includes(kw.toLowerCase()));
-    return allAbsent ? { ...t, done: true } : t;
-  });
+    if (allAbsent) {
+      result.push({ ...t, done: true });
+    } else {
+      result.push(t);
+    }
+  }
+  return result;
 }
 
 /**

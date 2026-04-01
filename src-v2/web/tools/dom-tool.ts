@@ -94,17 +94,17 @@ export function createDomTool(): ToolDefinition {
   return {
     name: "dom",
     description: [
-      "DOM actions on the current page.",
-      "Actions: click, fill, select_option, clear, check, uncheck, type, focus, hover, scroll, press, get_text, get_attr, set_attr, add_class, remove_class.",
-      "Prefer #hashID from snapshot as selector; use CSS only as compatibility fallback, not as the default strategy.",
-      "Before fill/type/select_option, click or focus the same target in the same round.",
-      "For multi-field forms, pair focus/click and fill/type per field in one batch.",
-      "press supports combos like Enter or Control+a.",
-      "Visual ordinal instructions use 1-based order.",
-      "check/uncheck toggles via click and verifies the final state.",
-      "Do not click nearby descriptive text, labels, or help text when a separate actionable control is visible; target the real interactive option that changes state.",
-      "For custom widgets such as rating, slider, or composite pickers, prefer visible actionable child items; use fill for slider-like controls when appropriate.",
-      "For virtualized lists, wheel pickers, or not-yet-visible options, scroll first and then click or select the newly visible target.",
+      "DOM actions on the current page.", // 当前页面的 DOM 操作
+      "Actions: click, fill, select_option, clear, check, uncheck, type, focus, hover, scroll, press, get_text, get_attr, set_attr, add_class, remove_class.", // 支持的动作列表
+      "Prefer #hashID from snapshot as selector; use CSS only as compatibility fallback, not as the default strategy.", // 优先使用快照中的 #hashID 作为选择器；仅在兼容性回退时使用 CSS 选择器，不作为默认策略
+      "Before fill/type/select_option, click or focus the same target in the same round.", // 在执行 fill/type/select_option 之前，在同一轮中先 click 或 focus 同一目标
+      "For multi-field forms, pair focus/click and fill/type per field in one batch.", // 对于多字段表单，在一个批次中为每个字段配对 focus/click 和 fill/type
+      "press supports combos like Enter or Control+a.", // press 支持 Enter 或 Control+a 等组合键
+      "Visual ordinal instructions use 1-based order.", // 视觉序数指令使用 1-based 顺序
+      "check/uncheck toggles via click and verifies the final state.", // check/uncheck 通过 click 切换并验证最终状态
+      "Do not click nearby descriptive text, labels, or help text when a separate actionable control is visible; target the real interactive option that changes state.", // 当有单独的可操作控件可见时，不要点击附近的描述性文本、标签或帮助文本；目标是真正的交互选项。
+      "For custom widgets such as rating, slider, or composite pickers, prefer visible actionable child items; use fill for slider-like controls when appropriate.", // 对于评分、滑块或复合选择器等自定义组件，优先可见的可操作子项；在适当时对类似滑块的控件使用 fill。
+      "For virtualized lists, wheel pickers, or not-yet-visible options, scroll first and then click or select the newly visible target.", // 对于虚拟化列表、滚轮选择器或尚不可见的选项，先滚动然后点击或选择新可见的目标
     ].join(" "),
 
     schema: Type.Object({

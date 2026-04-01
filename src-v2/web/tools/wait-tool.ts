@@ -36,10 +36,10 @@ export function createWaitTool(): ToolDefinition {
   return {
     name: "wait",
     description: [
-      "Wait for page conditions.",
-      "Actions: wait_for_selector, wait_for_hidden, wait_for_text, wait_for_stable, wait_for_timeout.",
-      "wait_for_selector supports attached, visible, hidden, detached.",
-      "wait_for_timeout: sleep for a fixed duration (timeout in ms). Use this when you need to wait a specific amount of time.",
+      "Wait for page conditions.", // 等待页面条件
+      "Actions: wait_for_selector, wait_for_hidden, wait_for_text, wait_for_stable,  wait_for_timeout.", // 支持的动作：wait_for_selector、wait_for_hidden、wait_for_text、wait_for_stable、wait_for_timeout
+      "wait_for_selector supports attached, visible, hidden, detached.", // wait_for_selector 支持的状态：attached、visible、hidden、detached
+      "wait_for_timeout: sleep for a fixed duration (timeout in ms). Use this when you need to wait a specific amount of time.", // wait_for_timeout：固定时长等待（以毫秒为单位）。在需要等待特定时间时使用。
     ].join(" "),
 
     schema: Type.Object({
