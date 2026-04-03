@@ -13,6 +13,7 @@ import { DeepSeekClient } from "./models/deepseek.js";
 import { DoubaoClient } from "./models/doubao.js";
 import { QwenClient } from "./models/qwen.js";
 import { MiniMaxClient } from "./models/minimax.js";
+import { GLMClient } from "./models/glm.js";
 
 // Re-export 类型，方便外部统一从 ai-client 导入
 export type { AIClient, AIChatResponse, AIMessage, AIToolCall } from "../types.js";
@@ -25,12 +26,13 @@ export { DeepSeekClient } from "./models/deepseek.js";
 export { DoubaoClient } from "./models/doubao.js";
 export { QwenClient } from "./models/qwen.js";
 export { MiniMaxClient } from "./models/minimax.js";
+export { GLMClient } from "./models/glm.js";
 
 // ─── 公共类型定义 ───
 
 /** AI 客户端配置（中）/ AI client configuration (EN). */
 export type AIClientConfig = {
-  /** AI 提供商: "openai" | "copilot" | "anthropic" | "deepseek" | "doubao" | "qwen" | "minimax" */
+  /** AI 提供商: "openai" | "copilot" | "anthropic" | "deepseek" | "doubao" | "qwen" | "minimax" | "glm" */
   provider: string;
   /** 模型名称，如 "gpt-4o"、"claude-sonnet-4-20250514" */
   model: string;
@@ -92,9 +94,11 @@ export function createAIClient(config: AIClientConfig): AIClient {
       return new DeepSeekClient(config);
     case "minimax":
       return new MiniMaxClient(config);
+    case "glm":
+      return new GLMClient(config);
     default:
       throw new Error(
-        `Unknown AI provider: ${config.provider}. Supported: openai, copilot, anthropic, deepseek, doubao, qwen, minimax`,
+        `Unknown AI provider: ${config.provider}. Supported: openai, copilot, anthropic, deepseek, doubao, qwen, minimax, glm`,
       );
   }
 }

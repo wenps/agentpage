@@ -44,6 +44,7 @@ import { resolveSelector } from "../helpers/base/resolve-selector.js";
 import { sleep, dispatchClickEvents, dispatchHoverEvents, dispatchInputEvents, setNativeValue, selectText } from "../helpers/base/event-dispatch.js";
 import { splitKeyCombo, resolveKeyCode, executePress } from "../helpers/base/keyboard.js";
 import { checkElementStable, scrollIntoViewIfNeeded, checkHitTarget, describeElement, ensureActionable, validateClickSignal } from "../helpers/base/actionability.js";
+import { forceHoverStyles, cleanupHoverStyles } from "../helpers/base/hover-force.js";
 import { retarget, getChecked, resolveCheckableTarget, resolvePointerActionTarget, resolveFormItemControlTarget } from "../helpers/actions/retarget.js";
 import { executeFillOnResolvedTarget, guessNearbyFillTarget, findAssociatedSliderInput } from "../helpers/actions/fill-helpers.js";
 import { findVisibleOptionByText, waitForDropdownPopup } from "../helpers/actions/dropdown-helpers.js";
@@ -159,6 +160,9 @@ export function createDomTool(): ToolDefinition {
           : el;
 
       try {
+        // 非 hover action 时清理上一次的 force hover
+        if (action !== "hover") cleanupHoverStyles();
+
         // actionability（skip for force / read-only actions）
         const checkResult = ensureActionable(actionabilityTarget, action, selector, force);
         if (checkResult) return checkResult;
@@ -406,7 +410,10 @@ export function createDomTool(): ToolDefinition {
             const target = retarget(el, "none");
             scrollIntoViewIfNeeded(target);
             if (!force) await checkElementStable(target, 500);
-            if (target instanceof HTMLElement) dispatchHoverEvents(target);
+            if (target instanceof HTMLElement) {
+              dispatchHoverEvents(target);
+              forceHoverStyles(target);
+            }
             return { content: `已悬停 ${describeElement(target)}` };
           }
 

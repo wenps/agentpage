@@ -14,6 +14,7 @@ export const PROVIDER_ENDPOINTS: Record<string, string> = {
   doubao: "https://ark.cn-beijing.volces.com/api/v3",
   qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
   minimax: "https://api.minimaxi.com/v1",
+  glm: "https://open.bigmodel.cn/api/paas/v4",
 };
 
 // ─── 共享工具函数 ───

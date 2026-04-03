@@ -9,3 +9,4 @@ export { DeepSeekClient } from "./deepseek.js";
 export { DoubaoClient } from "./doubao.js";
 export { QwenClient } from "./qwen.js";
 export { MiniMaxClient } from "./minimax.js";
+export { GLMClient } from "./glm.js";

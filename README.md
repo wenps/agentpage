@@ -11,7 +11,7 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/language-TypeScript-3178C6" alt="TypeScript" /></a>
 <a href="https://www.npmjs.com/package/agentpage"><img src="https://img.shields.io/npm/v/agentpage" alt="npm" /></a>
-<a href="https://www.npmjs.com/package/agentpage"><img src="https://img.shields.io/npm/dm/agentpage" alt="downloads" /></a>
+<a href="https://www.npmjs.com/package/agentpage"><img src="https://img.shields.io/npm/dt/agentpage" alt="downloads" /></a>
 <a href="https://bundlephobia.com/package/agentpage"><img src="https://img.shields.io/bundlephobia/minzip/agentpage" alt="minzipped size" /></a>
 
 AutoPilot 的目标不是生成文本，而是在浏览器中完成真实任务：点击、填写、导航、等待、执行脚本，并在每一轮根据最新页面状态持续推进。
